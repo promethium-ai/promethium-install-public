@@ -1,0 +1,100 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "VPCModifyResources",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:CreateVpc",
+                "ec2:DeleteVpc",
+                "ec2:ModifyVpcAttribute",
+                "ec2:EnableVpcClassicLink",
+                "ec2:DisableVpcClassicLink",
+                "ec2:EnableVpcClassicLinkDnsSupport"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "SubnetModifyResources",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:CreateSubnet",
+                "ec2:DeleteSubnet",
+                "ec2:ModifySubnetAttribute"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "InternetAndNatGateway",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:CreateInternetGateway",
+                "ec2:DeleteInternetGateway",
+                "ec2:AttachInternetGateway",
+                "ec2:DetachInternetGateway",
+                "ec2:CreateNatGateway",
+                "ec2:DeleteNatGateway"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "RouteTableActions",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:CreateRouteTable",
+                "ec2:DeleteRouteTable",
+                "ec2:CreateRoute",
+                "ec2:DeleteRoute",
+                "ec2:AssociateRouteTable",
+                "ec2:DisassociateRouteTable"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "SecurityGroupActions",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:CreateSecurityGroup",
+                "ec2:DeleteSecurityGroup",
+                "ec2:AuthorizeSecurityGroupIngress",
+                "ec2:RevokeSecurityGroupIngress",
+                "ec2:AuthorizeSecurityGroupEgress",
+                "ec2:RevokeSecurityGroupEgress"
+            ],
+            "Resource": [
+                "arn:aws:ec2:<region>:<account_id>:security-group/*",
+                "arn:aws:ec2:<region>:<account_id>:vpc/*"
+            ]
+        },
+        {
+            "Sid": "ElasticIPActions",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:AllocateAddress",
+                "ec2:ReleaseAddress",
+                "ec2:AssociateAddress",
+                "ec2:DisassociateAddress"
+            ],
+            "Resource": "arn:aws:ec2:<region>:<account_id>:elastic-ip/*"
+        },
+        {
+            "Sid": "VPCDescribeResources",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:DescribeVpcs",
+                "ec2:DescribeSubnets",
+                "ec2:DescribeInternetGateways",
+                "ec2:DescribeNatGateways",
+                "ec2:DescribeRouteTables",
+                "ec2:DescribeAddresses",
+                "ec2:DescribeAddressesAttribute",
+                "ec2:DescribeVpcAttribute",
+                "ec2:DescribeVpcClassicLink",
+                "ec2:DescribeVpcClassicLinkDnsSupport",
+                "ec2:DescribeAvailabilityZones",
+                "ec2:DescribeSecurityGroups"
+            ],
+            "Resource": "*"
+        }
+    ]
+}

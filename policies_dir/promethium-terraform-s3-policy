@@ -1,0 +1,104 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "S3BucketManagement",
+            "Effect": "Allow",
+            "Action": [
+                "s3:CreateBucket",
+                "s3:DeleteBucket",
+                "s3:ListBucket",
+                "s3:GetBucketLocation"
+            ],
+            "Resource": [
+                "arn:aws:s3:::*-trino-*",
+                "arn:aws:s3:::*-postgres-backups-*"
+            ]
+        },
+        {
+            "Sid": "S3BucketConfiguration",
+            "Effect": "Allow",
+            "Action": [
+                "s3:PutBucketPolicy",
+                "s3:GetBucketPolicy",
+                "s3:DeleteBucketPolicy",
+                "s3:PutEncryptionConfiguration",
+                "s3:GetEncryptionConfiguration",
+                "s3:PutLifecycleConfiguration",
+                "s3:GetLifecycleConfiguration",
+                "s3:PutBucketVersioning",
+                "s3:GetBucketVersioning",
+                "s3:PutBucketTagging",
+                "s3:GetBucketTagging"
+            ],
+            "Resource": [
+                "arn:aws:s3:::*-trino-*",
+                "arn:aws:s3:::*-postgres-backups-*"
+            ]
+        },
+        {
+            "Sid": "S3ReadOnlyAccess",
+            "Effect": "Allow",
+            "Action": [
+                "s3:GetBucket*",
+                "s3:List*",
+                "s3:GetAccelerateConfiguration",
+                "s3:GetReplicationConfiguration"
+            ],
+            "Resource": [
+                "arn:aws:s3:::*-trino-*",
+                "arn:aws:s3:::*-postgres-backups-*"
+            ]
+        },
+        {
+            "Sid": "KMSCryptoAccess",
+            "Effect": "Allow",
+            "Action": [
+                "kms:GenerateDataKey",
+                "kms:Decrypt",
+                "kms:Encrypt",
+                "kms:DescribeKey",
+                "kms:ReEncrypt*"
+            ],
+            "Resource": "arn:aws:kms:*:*:key/*"
+        },
+        {
+            "Sid": "VisualEditor2",
+            "Effect": "Allow",
+            "Action": [
+                "kms:EnableKeyRotation",
+                "kms:EnableKey",
+                "kms:Decrypt",
+                "kms:ListKeyPolicies",
+                "kms:UntagResource",
+                "kms:PutKeyPolicy",
+                "kms:GetKeyPolicy",
+                "kms:Verify",
+                "kms:ListResourceTags",
+                "kms:DisableKey",
+                "kms:DisableKeyRotation",
+                "kms:TagResource",
+                "kms:Encrypt",
+                "kms:GetKeyRotationStatus",
+                "kms:ScheduleKeyDeletion",
+                "kms:CreateAlias",
+                "kms:DescribeKey",
+                "kms:Sign",
+                "kms:DeleteAlias"
+            ],
+            "Resource": [
+                "arn:aws:kms:<region>:<account_id>:alias/*",
+                "arn:aws:kms:*:<account_id>:key/*"
+            ]
+        },
+        {
+            "Sid": "VisualEditor2",
+            "Effect": "Allow",
+            "Action": [
+                "kms:CreateKey",
+                "kms:ListAliases"
+            ]
+        }
+    ],
+    "Resource": "*"
+}

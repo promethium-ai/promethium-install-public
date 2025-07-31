@@ -1,0 +1,35 @@
+{
+    "Statement": [
+        {
+            "Action": [
+                "autoscaling:SetDesiredCapacity",
+                "autoscaling:TerminateInstanceInAutoScalingGroup"
+            ],
+            "Condition": {
+                "StringEquals": {
+                    "aws:ResourceTag/k8s.io/cluster-autoscaler/<eks_cluster_name>": "owned"
+                }
+            },
+            "Effect": "Allow",
+            "Resource": "*",
+            "Sid": "VisualEditor0"
+        },
+        {
+            "Action": [
+                "autoscaling:DescribeAutoScalingGroups",
+                "autoscaling:DescribeAutoScalingInstances",
+                "autoscaling:DescribeLaunchConfigurations",
+                "autoscaling:DescribeScalingActivities",
+                "ec2:DescribeImages",
+                "ec2:DescribeInstanceTypes",
+                "ec2:DescribeLaunchTemplateVersions",
+                "ec2:GetInstanceTypesFromInstanceRequirements",
+                "eks:DescribeNodegroup"
+            ],
+            "Effect": "Allow",
+            "Resource": "*",
+            "Sid": "VisualEditor1"
+        }
+    ],
+    "Version": "2012-10-17"
+}

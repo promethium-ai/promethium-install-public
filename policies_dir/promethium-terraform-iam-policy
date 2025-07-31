@@ -1,0 +1,131 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "IAMWildcardPermissions",
+            "Effect": "Allow",
+            "Action": [
+                "iam:ListRoles",
+                "iam:ListUsers",
+                "iam:ListGroups",
+                "iam:ListPolicies",
+                "iam:ListInstanceProfiles",
+                "iam:ListRolePolicies",
+                "iam:ListUserPolicies",
+                "iam:ListAttachedRolePolicies",
+                "iam:ListAttachedUserPolicies",
+                "iam:ListAttachedGroupPolicies",
+                "iam:GetAccountSummary",
+                "iam:GetAccountPasswordPolicy",
+                "iam:GetAccountAuthorizationDetails",
+                "iam:GenerateCredentialReport",
+                "iam:GetCredentialReport",
+                "iam:GetPolicy",
+                "iam:GetPolicyVersion",
+                "iam:GetRole*",
+                "iam:GetUser",
+                "iam:GetGroup",
+                "iam:GetInstanceProfile",
+                "iam:GetServiceLinkedRoleDeletionStatus",
+                "iam:GetContextKeysForCustomPolicy",
+                "iam:GetContextKeysForPrincipalPolicy",
+                "iam:ListPolicyVersions",
+                "iam:ListInstanceProfilesForRole",
+                "iam:CreatePolicy"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "IAMResourceScopedPermissions",
+            "Effect": "Allow",
+            "Action": [
+                "iam:CreateUser",
+                "iam:CreateRole",
+                "iam:CreateGroup",
+                "iam:AttachUserPolicy",
+                "iam:DetachUserPolicy",
+                "iam:AttachGroupPolicy",
+                "iam:AttachRolePolicy",
+                "iam:PutUserPolicy",
+                "iam:PutRolePolicy",
+                "iam:PutGroupPolicy",
+                "iam:UpdateRole",
+                "iam:UpdateUser",
+                "iam:UpdateGroup",
+                "iam:AddUserToGroup",
+                "iam:PassRole",
+                "iam:TagRole",
+                "iam:CreatePolicyVersion",
+                "iam:CreatePolicy",
+                "iam:CreateOpenIDConnectProvider",
+                "iam:TagOpenIDConnectProvider",
+                "iam:GetOpenIDConnectProvider",
+                "iam:CreateInstanceProfile",
+                "iam:TagPolicy",
+                "iam:TagInstanceProfile",
+                "iam:AddRoleToInstanceProfile",
+                "iam:UpdateAssumeRolePolicy"
+            ],
+            "Resource": [
+                "arn:aws:iam::<account_id>:user/promethium-*",
+                "arn:aws:iam::<account_id>:role/promethium-*",
+                "arn:aws:iam::<account_id>:policy/promethium-*",
+                "arn:aws:iam::<account_id>:policy/*kms*",
+                "arn:aws:iam::<account_id>:group/promethium-*",
+                "arn:aws:iam::<account_id>:instance-profile/promethium*",
+                "arn:aws:iam::<account_id>:oidc-provider/oidc.eks.*.amazonaws.com/id/*"
+            ]
+        },
+        {
+            "Sid": "IAMResourceDeletePermissions",
+            "Effect": "Allow",
+            "Action": [
+                "iam:DeleteUser",
+                "iam:DeleteRole",
+                "iam:DeleteGroup",
+                "iam:DetachUserPolicy",
+                "iam:DetachGroupPolicy",
+                "iam:DetachRolePolicy",
+                "iam:DeleteUserPolicy",
+                "iam:DeleteRolePolicy",
+                "iam:DeleteGroupPolicy",
+                "iam:RemoveUserFromGroup",
+                "iam:UntagRole",
+                "iam:DeleteOpenIDConnectProvider",
+                "iam:RemoveRoleFromInstanceProfile",
+                "iam:DeletePolicy",
+                "iam:DeleteInstanceProfile",
+                "iam:DeletePolicyVersion"
+            ],
+            "Resource": [
+                "arn:aws:iam::<account_id>:user/promethium-*",
+                "arn:aws:iam::<account_id>:role/promethium-*",
+                "arn:aws:iam::<account_id>:policy/promethium-*",
+                "arn:aws:iam::<account_id>:policy/*kms*",
+                "arn:aws:iam::<account_id>:policy/*KMS*",
+                "arn:aws:iam::<account_id>:group/promethium-*",
+                "arn:aws:iam::<account_id>:instance-profile/promethium*",
+                "arn:aws:iam::<account_id>:oidc-provider/oidc.eks.*.amazonaws.com/id/*"
+            ]
+        },
+        {
+            "Sid": "IAMServiceLinkedRole",
+            "Effect": "Allow",
+            "Action": [
+                "iam:CreateServiceLinkedRole",
+                "iam:DeleteServiceLinkedRole"
+            ],
+            "Resource": "*",
+            "Condition": {
+                "StringEquals": {
+                    "iam:AWSServiceName": [
+                        "eks.amazonaws.com",
+                        "glue.amazonaws.com",
+                        "eks-nodegroup.amazonaws.com",
+                        "eks-addons.amazonaws.com"
+                    ]
+                }
+            }
+        }
+    ]
+}
