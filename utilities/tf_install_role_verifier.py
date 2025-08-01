@@ -337,9 +337,9 @@ class PolicyVerifier:
             if policy_missing:
                 missing_permissions[policy_name] = policy_missing
                 all_permissions_valid = False
-                print(f"  ❌ Missing permissions in {policy_name}")
+                print(f"   Missing permissions in {policy_name}")
             else:
-                print(f"  ✅ All permissions verified for {policy_name}")
+                print(f"   All permissions verified for {policy_name}")
         
         return all_permissions_valid, missing_permissions
 
@@ -373,19 +373,19 @@ class PolicyVerifier:
                     aws_principals = [aws_principals]
                 
                 if self.install_box_role_arn in aws_principals:
-                    print("  ✅ Trust policy allows install box role to assume this role")
+                    print("   Trust policy allows install box role to assume this role")
                     return True, "Trust policy is valid"
                 
                 for aws_principal in aws_principals:
                     if aws_principal == '*':
-                        print("  ⚠️  Trust policy allows any principal (wildcard)")
+                        print("    Trust policy allows any principal (wildcard)")
                         return True, "Trust policy allows wildcard access"
                     
                     if aws_principal == f"arn:aws:iam::{self.account_id}:root":
-                        print("  ⚠️  Trust policy allows account root")
+                        print("    Trust policy allows account root")
                         return True, "Trust policy allows account root access"
         
-        print("  ❌ Trust policy does not allow install box role to assume this role")
+        print("   Trust policy does not allow install box role to assume this role")
         return False, f"Trust policy does not include install box role ARN: {self.install_box_role_arn}"
 
     def run_verification(self) -> bool:
@@ -415,22 +415,22 @@ class PolicyVerifier:
         print("=" * 80)
         
         if permissions_valid:
-            print("✅ PERMISSIONS: All required permissions are present")
+            print(" PERMISSIONS: All required permissions are present")
         else:
-            print("❌ PERMISSIONS: Missing required permissions")
+            print(" PERMISSIONS: Missing required permissions")
             for policy_name, missing in missing_permissions.items():
                 print(f"\n  Missing in {policy_name}:")
                 for permission in missing:
                     print(f"    - {permission}")
         
         if trust_policy_valid:
-            print(f"✅ TRUST POLICY: {trust_policy_message}")
+            print(f" TRUST POLICY: {trust_policy_message}")
         else:
-            print(f"❌ TRUST POLICY: {trust_policy_message}")
+            print(f" TRUST POLICY: {trust_policy_message}")
         
         overall_result = permissions_valid and trust_policy_valid
         
-        print(f"\n{'✅ OVERALL RESULT: VERIFICATION PASSED' if overall_result else '❌ OVERALL RESULT: VERIFICATION FAILED'}")
+        print(f"\n{' OVERALL RESULT: VERIFICATION PASSED' if overall_result else ' OVERALL RESULT: VERIFICATION FAILED'}")
         print("=" * 80)
         
         return overall_result

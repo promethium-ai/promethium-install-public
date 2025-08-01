@@ -54,7 +54,7 @@ OUTPUT_DIR="./${COMPANY_NAME}"
 mkdir -p "$OUTPUT_DIR"
 
 # Find all matching policy files
-FILES=$(find "$POLICIES_DIR" -maxdepth 1 -type f -name '*policy')
+FILES=$(find "$POLICIES_DIR" -maxdepth 1 -type f -name '*policy.json')
 
 if [ -z "$FILES" ]; then
   echo "No matching policy files found in '$POLICIES_DIR'."

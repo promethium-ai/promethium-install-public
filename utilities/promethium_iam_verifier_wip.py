@@ -46,7 +46,7 @@ class PromethiumIAMVerifier:
             self.iam_client = boto3.client('iam', region_name=region)
             self.iam_client.get_user()
         except NoCredentialsError:
-            print("❌ AWS credentials not configured. Run 'aws configure' first.")
+            print(" AWS credentials not configured. Run 'aws configure' first.")
             sys.exit(1)
         except ClientError as e:
             if e.response['Error']['Code'] == 'AccessDenied':
@@ -55,10 +55,10 @@ class PromethiumIAMVerifier:
                     sts_client.get_caller_identity()
                     self.iam_client = boto3.client('iam', region_name=region)
                 except Exception:
-                    print(f"❌ AWS authentication failed: {e}")
+                    print(f" AWS authentication failed: {e}")
                     sys.exit(1)
             else:
-                print(f"❌ AWS client initialization failed: {e}")
+                print(f" AWS client initialization failed: {e}")
                 sys.exit(1)
 
     def substitute_placeholders(self, template: str) -> str:
@@ -1503,7 +1503,7 @@ class PromethiumIAMVerifier:
 
     def verify_all(self) -> Dict[str, Any]:
         """Run all verifications and return comprehensive results"""
-        print("🔍 Starting Promethium IAM verification...")
+        print("    Starting Promethium IAM verification...")
         print(f"   Account ID: {self.account_id}")
         print(f"   Region: {self.region}")
         print(f"   EKS OIDC ID: {self.eks_oidc_id}")
@@ -1522,7 +1522,7 @@ class PromethiumIAMVerifier:
             )
             self.results.append(trust_policy_result)
         
-        print("📋 Verifying Terraform custom policies...")
+        print("Verifying Terraform custom policies...")
         for policy_name, expected_doc in expected_policies.items():
             policy_result = self.verify_policy_exists(policy_name)
             self.results.append(policy_result)
@@ -1531,7 +1531,7 @@ class PromethiumIAMVerifier:
                 doc_result = self.verify_policy_document(policy_name, expected_doc)
                 self.results.append(doc_result)
         
-        print("📋 Verifying EKS custom policies...")
+        print("Verifying EKS custom policies...")
         expected_custom_policies = self.get_expected_custom_policies()
         for policy_name, expected_doc in expected_custom_policies.items():
             policy_result = self.verify_policy_exists(policy_name)
@@ -1541,7 +1541,7 @@ class PromethiumIAMVerifier:
                 doc_result = self.verify_policy_document(policy_name, expected_doc)
                 self.results.append(doc_result)
         
-        print("👥 Verifying EKS service roles...")
+        print("Verifying EKS service roles...")
         for role_name, config in expected_roles.items():
             role_result = self.verify_role_exists(role_name)
             self.results.append(role_result)
@@ -1583,20 +1583,16 @@ class PromethiumIAMVerifier:
 
     def print_results(self, results: Dict[str, Any]):
         """Print formatted verification results"""
-        status_emoji = {
-            "PASSED": "✅",
-            "FAILED": "❌", 
-            "WARNINGS": "⚠️"
-        }
         
-        print(f"\n{status_emoji[results['verification_status']]} Verification {results['verification_status']}")
-        print(f"📊 Summary: {results['summary']['passed']} passed, {results['summary']['failed']} failed, {results['summary']['warnings']} warnings")
+
+        print(f"\nVerification {results['verification_status']}")
+        print(f" Summary: {results['summary']['passed']} passed, {results['summary']['failed']} failed, {results['summary']['warnings']} warnings")
         print()
         
         for status in ["FAILED", "WARNING", "PASSED"]:
             status_results = [r for r in results['results'] if r['status'] == status]
             if status_results:
-                print(f"{status_emoji[status]} {status} ({len(status_results)}):")
+                print(f"{status} ({len(status_results)}):")
                 for result in status_results:
                     print(f"  • {result['message']}")
                 print()
@@ -1604,7 +1600,7 @@ class PromethiumIAMVerifier:
 
 def test_placeholder_substitution():
     """Test placeholder substitution functionality"""
-    print("🧪 Testing placeholder substitution...")
+    print(" Testing placeholder substitution...")
     
     test_account_id = "123456789012"
     test_region = "us-west-2"
@@ -1647,9 +1643,9 @@ def test_placeholder_substitution():
     for test_case in test_cases:
         result = verifier.substitute_placeholders(test_case["template"])
         if result == test_case["expected"]:
-            print(f"  ✅ {test_case['name']}: PASSED")
+            print(f"   {test_case['name']}: PASSED")
         else:
-            print(f"  ❌ {test_case['name']}: FAILED")
+            print(f"   {test_case['name']}: FAILED")
             print(f"     Expected: {test_case['expected']}")
             print(f"     Got:      {result}")
             all_passed = False
@@ -1662,10 +1658,10 @@ def test_placeholder_substitution():
         remaining_placeholders = re.findall(r'<[^>]+>', policy_str)
         
         if remaining_placeholders:
-            print(f"  ❌ {policy_name}: Found unsubstituted placeholders: {remaining_placeholders}")
+            print(f"   {policy_name}: Found unsubstituted placeholders: {remaining_placeholders}")
             all_passed = False
         else:
-            print(f"  ✅ {policy_name}: All placeholders substituted")
+            print(f"   {policy_name}: All placeholders substituted")
     
     print("\n🔧 Testing EKS custom policy template substitution...")
     expected_custom_policies = verifier.get_expected_custom_policies()
@@ -1675,10 +1671,10 @@ def test_placeholder_substitution():
         remaining_placeholders = re.findall(r'<[^>]+>', policy_str)
         
         if remaining_placeholders:
-            print(f"  ❌ {policy_name}: Found unsubstituted placeholders: {remaining_placeholders}")
+            print(f"   {policy_name}: Found unsubstituted placeholders: {remaining_placeholders}")
             all_passed = False
         else:
-            print(f"  ✅ {policy_name}: All placeholders substituted")
+            print(f"   {policy_name}: All placeholders substituted")
     
     print("\n👥 Testing role trust policy substitution...")
     expected_roles = verifier.get_expected_roles()
@@ -1688,12 +1684,12 @@ def test_placeholder_substitution():
         remaining_placeholders = re.findall(r'<[^>]+>', trust_policy_str)
         
         if remaining_placeholders:
-            print(f"  ❌ {role_name}: Found unsubstituted placeholders: {remaining_placeholders}")
+            print(f"   {role_name}: Found unsubstituted placeholders: {remaining_placeholders}")
             all_passed = False
         else:
-            print(f"  ✅ {role_name}: All placeholders substituted")
+            print(f"   {role_name}: All placeholders substituted")
     
-    print(f"\n{'✅ All placeholder tests PASSED!' if all_passed else '❌ Some placeholder tests FAILED!'}")
+    print(f"\n{' All placeholder tests PASSED!' if all_passed else ' Some placeholder tests FAILED!'}")
     return all_passed
 
 
@@ -1713,7 +1709,7 @@ def main():
         sys.exit(0 if success else 1)
     
     if not all([args.account_id, args.region, args.eks_oidc_id]):
-        print("❌ Missing required arguments. Use --help for usage information.")
+        print(" Missing required arguments. Use --help for usage information.")
         sys.exit(1)
     
     try:
@@ -1725,12 +1721,12 @@ def main():
         if args.output_json:
             with open(args.output_json, 'w') as f:
                 json.dump(results, f, indent=2)
-            print(f"📄 Results saved to {args.output_json}")
+            print(f"Results saved to {args.output_json}")
         
         sys.exit(0 if results['verification_status'] == 'PASSED' else 1)
         
     except Exception as e:
-        print(f"❌ Verification failed with error: {e}")
+        print(f" Verification failed with error: {e}")
         sys.exit(1)
 
 
