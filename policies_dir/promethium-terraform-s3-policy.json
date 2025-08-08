@@ -40,8 +40,29 @@
             "Sid": "S3ReadOnlyAccess",
             "Effect": "Allow",
             "Action": [
-                "s3:GetBucket*",
-                "s3:List*",
+                "s3:GetBucketAcl",
+                "s3:GetBucketCORS",
+                "s3:GetBucketLocation",
+                "s3:GetBucketLogging",
+                "s3:GetBucketMetadataTableConfiguration",
+                "s3:GetBucketNotification",
+                "s3:GetBucketObjectLockConfiguration",
+                "s3:GetBucketOwnershipControls",
+                "s3:GetBucketPolicy",
+                "s3:GetBucketPolicyStatus",
+                "s3:GetBucketPublicAccessBlock",
+                "s3:GetBucketRequestPayment",
+                "s3:GetBucketTagging",
+                "s3:GetBucketVersioning",
+                "s3:GetBucketWebsite",
+                "s3:ListAccessGrants",
+                "s3:ListAccessGrantsLocations",
+                "s3:ListBucket",
+                "s3:ListBucketMultipartUploads",
+                "s3:ListBucketVersions",
+                "s3:ListCallerAccessGrants",
+                "s3:ListMultipartUploadParts",
+                "s3:ListTagsForResource",
                 "s3:GetAccelerateConfiguration",
                 "s3:GetReplicationConfiguration"
             ],
@@ -58,12 +79,26 @@
                 "kms:Decrypt",
                 "kms:Encrypt",
                 "kms:DescribeKey",
-                "kms:ReEncrypt*"
+                "kms:ReEncryptTo",
+                "kms:ReEncryptFrom"
             ],
             "Resource": "arn:aws:kms:*:*:key/*"
         },
         {
-            "Sid": "VisualEditor2",
+            "Sid": "KMS_KeyAlias",
+            "Effect": "Allow",
+            "Action": [
+                "kms:CreateAlias",
+                "kms:ListAliases",
+                "kms:DeleteAlias"
+            ],
+            "Resource": [
+                "arn:aws:kms:<region>:<account_id>:alias/*",
+                "arn:aws:kms:*:<account_id>:key/*"
+            ]
+        },
+        {
+            "Sid": "KMS_KeyAccess",
             "Effect": "Allow",
             "Action": [
                 "kms:EnableKeyRotation",
@@ -81,22 +116,11 @@
                 "kms:Encrypt",
                 "kms:GetKeyRotationStatus",
                 "kms:ScheduleKeyDeletion",
-                "kms:CreateAlias",
                 "kms:DescribeKey",
-                "kms:Sign",
-                "kms:DeleteAlias"
+                "kms:Sign"
             ],
             "Resource": [
-                "arn:aws:kms:<region>:<account_id>:alias/*",
                 "arn:aws:kms:*:<account_id>:key/*"
-            ]
-        },
-        {
-            "Sid": "VisualEditor2",
-            "Effect": "Allow",
-            "Action": [
-                "kms:CreateKey",
-                "kms:ListAliases"
             ]
         }
     ],

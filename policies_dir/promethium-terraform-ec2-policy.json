@@ -2,33 +2,104 @@
     "Version": "2012-10-17",
     "Statement": [
         {
+            "Sid": "EC2InstanceActions",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:AttachVolume",
+                "ec2:AttachNetworkInterface",
+                "ec2:DetachNetworkInterface",
+                "ec2:ModifyInstanceAttribute",
+                "ec2:RunInstances",
+                "ec2:TerminateInstances",
+                "ec2:DetachVolume"
+            ],
+            "Resource": [
+                "arn:aws:ec2:<region>:<account_id>:instance/*"
+            ]
+        },
+        {
+            "Sid": "EC2LaunchTemplateActions",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:CreateLaunchTemplate",
+                "ec2:CreateLaunchTemplateVersion",
+                "ec2:DeleteLaunchTemplate",
+                "ec2:RunInstances"
+            ],
+            "Resource": [
+                "arn:aws:ec2:<region>:<account_id>:launch-template/*"
+            ]
+        },
+        {
+            "Sid": "EC2KeyPairActions",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:CreateKeyPair",
+                "ec2:DeleteKeyPair",
+                "ec2:RunInstances"
+            ],
+            "Resource": [
+                "arn:aws:ec2:<region>:<account_id>:key-pair/*"
+            ]
+        },
+        {
             "Sid": "EC2CoreActions",
             "Effect": "Allow",
             "Action": [
                 "ec2:AttachVolume",
-                "ec2:CreateLaunchTemplate",
-                "ec2:CreateLaunchTemplateVersion",
-                "ec2:DeleteLaunchTemplate",
-                "ec2:CreateKeyPair",
-                "ec2:DeleteKeyPair",
                 "ec2:CreateVolume",
+                "ec2:ModifyInstanceAttribute",
+                "ec2:RunInstances",
+                "ec2:DetachVolume"
+            ],
+            "Resource": [
+                "arn:aws:ec2:<region>:<account_id>:volume/*"
+            ]
+        },
+        {
+            "Sid": "EC2NetworkInterfaceActions",
+            "Effect": "Allow",
+            "Action": [
                 "ec2:AttachNetworkInterface",
                 "ec2:DetachNetworkInterface",
                 "ec2:DeleteNetworkInterface",
-                "ec2:ModifyInstanceAttribute",
                 "ec2:RunInstances",
-                "ec2:TerminateInstances",
-                "ec2:DetachVolume",
                 "ec2:CreateNetworkInterface"
             ],
             "Resource": [
-                "arn:aws:ec2:<region>:<account_id>:instance/*",
-                "arn:aws:ec2:<region>:<account_id>:launch-template/*",
-                "arn:aws:ec2:<region>:<account_id>:key-pair/*",
-                "arn:aws:ec2:<region>:<account_id>:volume/*",
-                "arn:aws:ec2:<region>:<account_id>:network-interface/*",
-                "arn:aws:ec2:<region>:<account_id>:security-group/*",
-                "arn:aws:ec2:<region>:<account_id>:subnet/*",
+                "arn:aws:ec2:<region>:<account_id>:network-interface/*"
+            ]
+        },
+        {
+            "Sid": "EC2CoreActions",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:ModifyInstanceAttribute",
+                "ec2:RunInstances",
+                "ec2:CreateNetworkInterface"
+            ],
+            "Resource": [
+                "arn:aws:ec2:<region>:<account_id>:security-group/*"
+            ]
+        },
+        {
+            "Sid": "EC2CoreActions",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:RunInstances",
+                "ec2:CreateNetworkInterface"
+            ],
+            "Resource": [
+                "arn:aws:ec2:<region>:<account_id>:subnet/*"
+            ]
+        },
+        {
+            "Sid": "EC2ImageActions",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:RunInstances"
+            ],
+            "Resource": [
                 "arn:aws:ec2:<region>::image/*"
             ]
         },
@@ -65,8 +136,7 @@
             "Sid": "STSPermissions",
             "Effect": "Allow",
             "Action": "sts:AssumeRole",
-            "Resource":
-"arn:aws:iam::734236616923:role/promethium-terraform-saas-assume-role"
+            "Resource": "arn:aws:iam::<account_id>:role/promethium-terraform-saas-assume-role"
         },
         {
             "Sid": "SSMParameter",

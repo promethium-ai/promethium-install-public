@@ -2,34 +2,47 @@
     "Version": "2012-10-17",
     "Statement": [
         {
-            "Sid": "EKSPermissions",
+            "Sid": "EKS_ClusterPermissions",
             "Effect": "Allow",
             "Action": [
+                "eks:ListUpdates",
+                "eks:DescribeUpdate",
+                "eks:DescribeCluster",
                 "eks:UpdateClusterVersion",
-                "eks:ListNodegroups",
-                "eks:UntagResource",
-                "eks:ListTagsForResource",
                 "eks:UpdateClusterConfig",
-                "eks:CreateNodegroup",
                 "eks:DeleteCluster",
                 "eks:CreateFargateProfile",
-                "eks:UpdateNodegroupVersion",
                 "eks:ListFargateProfiles",
-                "eks:DescribeNodegroup",
-                "eks:ListUpdates",
-                "eks:DeleteNodegroup",
-                "eks:DescribeUpdate",
                 "eks:TagResource",
-                "eks:UpdateNodegroupConfig",
-                "eks:DescribeCluster"
+                "eks:ListTagsForResource",
+                "eks:UntagResource",
+                "eks:CreateNodegroup",
+                "eks:ListNodegroups"
             ],
             "Resource": [
-                "arn:aws:eks:<region>:<account_id>:cluster/promethium*",
+                "arn:aws:eks:<region>:<account_id>:cluster/promethium*"
+            ]
+        },
+        {
+            "Sid": "EKS_NodeGroupPermissions",
+            "Effect": "Allow",
+            "Action": [
+                "eks:ListUpdates",
+                "eks:DescribeUpdate",
+                "eks:TagResource",
+                "eks:ListTagsForResource",
+                "eks:UntagResource",
+                "eks:UpdateNodegroupVersion",
+                "eks:UpdateNodegroupConfig",
+                "eks:DescribeNodegroup",
+                "eks:DeleteNodegroup"
+            ],
+            "Resource": [
                 "arn:aws:eks:<region>:<account_id>:nodegroup/promethium*/*/*"
             ]
         },
         {
-            "Sid": "EKSCreatePermissions",
+            "Sid": "EKS_CreateCluster",
             "Effect": "Allow",
             "Action": [
                 "eks:ListClusters",

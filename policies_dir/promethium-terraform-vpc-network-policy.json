@@ -62,7 +62,16 @@
                 "ec2:RevokeSecurityGroupEgress"
             ],
             "Resource": [
-                "arn:aws:ec2:<region>:<account_id>:security-group/*",
+                "arn:aws:ec2:<region>:<account_id>:security-group/*"
+            ]
+        },
+        {
+            "Sid": "SecurityGroupActionsOnVPC",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:CreateSecurityGroup"
+            ],
+            "Resource": [
                 "arn:aws:ec2:<region>:<account_id>:vpc/*"
             ]
         },
