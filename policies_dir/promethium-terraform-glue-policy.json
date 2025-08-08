@@ -27,8 +27,7 @@
                 "glue:TagResource"
             ],
             "Resource": [
-                "arn:aws:glue:*:<account_id>:catalog",
-                "arn:aws:glue:*:<account_id>:database/*_trino"
+                "arn:aws:glue:*:<account_id>:catalog"
             ]
         },
         {

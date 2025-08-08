@@ -2,28 +2,40 @@
     "Version": "2012-10-17",
     "Statement": [
         {
-            "Sid": "EFSPermissions",
+            "Sid": "EFS_FileSysPermissions",
             "Effect": "Allow",
             "Action": [
+                "elasticfilesystem:CreateMountTarget",
                 "elasticfilesystem:ModifyMountTargetSecurityGroups",
                 "elasticfilesystem:DescribeMountTargets",
-                "elasticfilesystem:UntagResource",
-                "elasticfilesystem:CreateMountTarget",
+                "elasticfilesystem:DeleteMountTarget",
+                "elasticfilesystem:DescribeMountTargetSecurityGroups",
                 "elasticfilesystem:DescribeLifecycleConfiguration",
                 "elasticfilesystem:DescribeAccessPoints",
                 "elasticfilesystem:DescribeFileSystems",
-                "elasticfilesystem:DeleteMountTarget",
                 "elasticfilesystem:DeleteFileSystem",
-                "elasticfilesystem:DescribeMountTargetSecurityGroups",
-                "elasticfilesystem:TagResource"
+                "elasticfilesystem:TagResource",
+                "elasticfilesystem:UntagResource"
             ],
             "Resource": [
-                "arn:aws:elasticfilesystem:<region>:<account_id>:access-point/*",
                 "arn:aws:elasticfilesystem:<region>:<account_id>:file-system/*"
             ]
         },
         {
-            "Sid": "EFSCreatePermissions",
+            "Sid": "EFS_AccessPointPermissions",
+            "Effect": "Allow",
+            "Action": [
+                "elasticfilesystem:DescribeAccessPoints",
+                "elasticfilesystem:DescribeMountTargets",
+                "elasticfilesystem:TagResource",
+                "elasticfilesystem:UntagResource"
+            ],
+            "Resource": [
+                "arn:aws:elasticfilesystem:<region>:<account_id>:access-point/*"
+            ]
+        },
+        {
+            "Sid": "EFS_CreatePermissions",
             "Effect": "Allow",
             "Action": "elasticfilesystem:CreateFileSystem",
             "Resource": "*"
