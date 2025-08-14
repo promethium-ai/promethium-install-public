@@ -268,7 +268,7 @@ class AutoscalerRoleVerifier(RoleVerifier):
         self.eks_oidc_id = eks_oidc_id
         self.eks_cluster_name = eks_cluster_name
         self.company_name = company_name
-        self.role_name = "promethium-eks-autoscaler-role.json"
+        self.role_name = "promethium-eks-autoscaler-role"
         self.aws_managed_policy = None
         self.customer_policy = "promethium-eks-autoscaler-policy"
         self.trust_policy_file = trust_policy_file or "promethium-eks-autoscaler-role-trust-policy.json"
