@@ -1,10 +1,10 @@
 # ✅ Promethium Intelligent Edge Installation
 
-Promethium utilizes a hybrid application architecture. 
+Promethium utilizes a hybrid application architecture.
 
 ![High Level Architecture Diagram](./images/PromethiumHighLevelArchitecture.png)
 
-Promethium Control Plane. The Promethium Control Plane is hosted and managed by Promethium. The scope of the control plane is; 
+Promethium Control Plane. The Promethium Control Plane is hosted and managed by Promethium. The scope of the control plane is;
 
 - Authentication
 - Metadata
@@ -23,6 +23,7 @@ Promethium Data Plane (Intelligent Edge). The Promethium Data Plane is installed
 This repository contains the artifacts your team needs to install the Promethium Intelligent Edge in your cloud environment. It is designed for security, consistency, and minimal operational overhead.
 
 ## 🌐 Supported Platforms
+
 - [**▶ AWS (EKS) Installation Guide**](./aws/README.md)
 - [**▶ Azure (AKS) Installation Guide**](./azure/README.md)
 
