@@ -1,0 +1,6 @@
+promethium-eks-autoscaler-role
+promethium-efscsi-role
+promethium-lbcontroller-role
+promethium-s3-access-role
+promethium-eks-cluster-role
+promethium-trino-oidc-role
