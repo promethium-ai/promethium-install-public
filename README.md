@@ -24,7 +24,7 @@ This repository contains the artifacts your team needs to install the Promethium
 
 ## 🌐 Supported Platforms
 
-- [**▶ AWS (EKS) Installation Guide**](./aws/README.md)
+- [**▶ AWS (EKS) Installation Guide**](./AWS/README.md)
 - [**▶ Azure (AKS) Installation Guide**](./azure/README.md)
 
 ## 🧱 Installation Overview
