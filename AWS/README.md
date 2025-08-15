@@ -26,6 +26,7 @@ Create the following IAM roles and policies using Promethium-provided templates.
 |-----------------------|-----------------------------|-----------------------------------------------|----------------------------------------|
 | `PromethiumInstall`   | Install VM                  |                                               | Access required to install Promethium Intelligent Edge (IE)|
 
+
 ---
 
 ## 🧪 4. Role and Policy Validation
