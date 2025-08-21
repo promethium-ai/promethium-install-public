@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AWS IAM Role Verification Script for Promethium EKS Roles
+AWS IAM Role Verification Script for Promethium IE Roles
 
 This script verifies seven roles:
 1. promethium-ebscsi-role with trust policy, AWS managed policy AmazonEBSCSIDriverPolicy, 
