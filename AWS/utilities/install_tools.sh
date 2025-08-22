@@ -1,7 +1,5 @@
 #!/bin/bash
 
-# Function to install tools on Linux
-install_tools_linux() {
     echo "Installing tools for Linux..."
 
     # Install kubectl
@@ -111,80 +109,5 @@ install_tools_linux() {
     else
         echo "SSM Agent is already installed and running."
     fi
-}
 
-# Function to install tools on macOS
-install_tools_mac() {
-    echo "Installing tools for macOS..."
 
-    # Install kubectl
-    if ! command -v kubectl &> /dev/null; then
-        echo "Installing kubectl..."
-        curl -LO "https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/darwin/amd64/kubectl"
-        sudo mv kubectl /usr/local/bin/kubectl
-        sudo chmod +x /usr/local/bin/kubectl
-    else
-        echo "kubectl is already installed."
-    fi
-
-    # Install Helm
-    if ! command -v helm &> /dev/null; then
-        echo "Installing Helm..."
-        curl -LO "https://get.helm.sh/helm-v3.7.0-darwin-amd64.tar.gz"
-        tar -zxvf helm-v3.7.0-darwin-amd64.tar.gz
-        sudo mv darwin-amd64/helm /usr/local/bin/helm
-        sudo chmod +x /usr/local/bin/helm
-        rm -rf darwin-amd64
-        rm helm-v3.7.0-darwin-amd64.tar.gz
-    else
-        echo "Helm is already installed."
-    fi
-
-    # Install Git
-    if ! command -v git &> /dev/null; then
-        echo "Installing Git..."
-        brew install git
-    else
-        echo "Git is already installed."
-    fi
-
-    # Install AWS CLI v2
-    if ! command -v aws &> /dev/null; then
-        echo "Installing AWS CLI v2..."
-        curl "https://awscli.amazonaws.com/AWSCLIV2.pkg" -o "AWSCLIV2.pkg"
-        sudo installer -pkg AWSCLIV2.pkg -target /
-        rm AWSCLIV2.pkg
-    else
-        echo "AWS CLI v2 is already installed."
-    fi
-
-    # Install Python
-    if ! command -v python3 &> /dev/null; then
-        echo "Installing Python..."
-        brew install python
-    else
-        echo "Python is already installed."
-    fi
-
-        # Install Terraform
-    if ! command -v terraform &> /dev/null; then
-        echo "Installing Terraform..."
-        brew tap hashicorp/tap
-        brew install hashicorp/tap/terraform
-    else
-        echo "Terraform is already installed."
-    fi
-
-}
-
-# Determine the operating system
-OS=$(uname -s)
-
-if [[ "$OS" == "Linux" ]]; then
-    install_tools_linux
-elif [[ "$OS" == "Darwin" ]]; then
-    install_tools_mac
-else
-    echo "Unsupported operating system: $OS"
-    exit 1
-fi
