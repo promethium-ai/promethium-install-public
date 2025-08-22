@@ -90,7 +90,7 @@ class PolicyVerifier:
 
     def get_required_trust_policy(self) -> Dict:
         """Load the required trust policy from filesystem"""
-        return self.load_policy_from_file("promethium-terraform-install-role-trust-policy")
+        return self.load_policy_from_file("promethium-terraform-install-role-trust-policy.json")
 
     def get_role_policies(self, role_name: str) -> Tuple[List[Dict], List[Dict]]:
         """Get all policies attached to a role (managed and inline)"""
