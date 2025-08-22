@@ -15,16 +15,27 @@ The following steps will describe how to deploy a secure Promethium Intelligent 
 | Outbound Internet Access| Ensure EKS nodes have HTTPS access to Promethium Control Plane + image registry |
 | DNS & Ingress           | Allow cloud-native ingress (ALB) creation and domain assignment         |
 | S3 Bucket               | Storage location for state persistence and materialized Datamaps |
+| Company Name            | This is a variable <company_name> that is used in a number of the scripts in this guide. Please liaise with your Promethium technical representative to agree on the value for this variable. |
 
 ---
 
-## 🔐 2. IAM Roles & Policies (Customer-Managed)
+## 🔐 2. IAM Roles & Policies
 
-Create the following IAM roles and policies using Promethium-provided templates. Ensure roles are tagged (e.g., `Service=PromethiumIE`).
+Create the following IAM roles and policies using Promethium-provided templates. Ensure all roles and policies are tagged (e.g., `Service=PromethiumIE`). The roles policies in this repo have placeholders for the AWS account ID and AWS region that the IE will be deployed to. Post cloning this repository you can the the utility [update-policies.sh](utilities/update-policies.sh) to add the AWS account ID and the AWS region to the policies that have placeholders.
+
+### 🚀 Usage
+
+`python3 tf_install_role_verifier <Need to fill in parameters>`
+
+| Parameter | Description | Example |
+| --------- | ----------- | ------- |
+|  |  |  |
+|  |  |  |
+|  |  |  |
 
 | Resource | What uses it | Attached Policies | Trust Policies | Notes |
 |----------|--------------|-------------------|----------------|-------|
-| `PromethiumInstall`   | Install VM | <ul><li> [promethium-terraform-acm-policy.json](policies_dir/promethium-terraform-acm-policy.json) </li> <li>[promethium-terraform-ec2-policy.json](policies_dir/promethium-terraform-ec2-policy.json)</li> <li>[promethium-terraform-efs-policy.json](policies_dir/promethium-terraform-efs-policy.json) </li> <li> [promethium-terraform-eks-policy.json](policies_dir/promethium-terraform-eks-policy.json)</li> <li>[promethium-terraform-elb-permissions.json](policies_dir/promethium-terraform-elb-permissions.json)</li> <li>[promethium-terraform-glue-policy.json](policies_dir/promethium-terraform-glue-policy.json)</li> </ul> | [promethium-terraform-install-role-trust-policy.json](policies_dir/promethium-terraform-install-role-trust-policy.json) | Access required to install Promethium Intelligent Edge (IE)|
+| `PromethiumInstall`   | Install VM | <ul><li> [promethium-terraform-acm-policy.json](policies_dir/promethium-terraform-acm-policy.json) </li> <li>[promethium-terraform-ec2-policy.json](policies_dir/promethium-terraform-ec2-policy.json)</li> <li>[promethium-terraform-efs-policy.json](policies_dir/promethium-terraform-efs-policy.json) </li> <li> [promethium-terraform-eks-policy.json](policies_dir/promethium-terraform-eks-policy.json)</li> <li>[promethium-terraform-elb-permissions.json](policies_dir/promethium-terraform-elb-permissions.json)</li> <li>[promethium-terraform-glue-policy.json](policies_dir/promethium-terraform-glue-policy.json)</li> <li> [AmazonSSMManagedInstanceCore](https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AmazonSSMManagedInstanceCore.html)</li> </ul> | [promethium-terraform-install-role-trust-policy.json](policies_dir/promethium-terraform-install-role-trust-policy.json) | This role needs to be created as an **Instance Profile Role**. It will be attached to the install VM required to install Promethium Intelligent Edge (IE)|
 | `promethium-efscsi-role` | Promethium Intelligent Edge (IE) | <ul> [promethium-efscsi-policy.json](policies_dir/promethium-efscsi-policy.json) </ul> | [promethium-efscsi-role-trust-policy.json](policies_dir/promethium-efscsi-role-trust-policy.json) | Allows EFS CSI driver in the EKS cluster to provision and manage EFS file systems and access points|
 | `promethium-eks-autoscaler-role` | Promethium Intelligent Edge (IE) |  <ul> [promethium-eks-autoscaler-policy.json](policies_dir/promethium-eks-autoscaler-policy.json) </ul>| [promethium-eks-autoscaler-role-trust-policy.json](policies_dir/promethium-eks-autoscaler-role-trust-policy.json) | Allows EKS Autoscaler to add or remove worker nodes in Auto Scaling Groups and inspect EC2 and EKS resources to make scaling decisions |
 | `promethium-lbcontroller-role` | Promethium Intelligent Edge (IE) | <ul> [promethium-lbcontroller-policy.json](policies_dir/promethium-lbcontroller-policy.json) </ul> | [promethium-lbcontroller-role-trust-policy.json](policies_dir/promethium-lbcontroller-role-trust-policy.json) | Allows the Load Balancer Controller running the EKS cluster to provision and manage ALBs/NLBs and related networking/security resources on behalf of Kubernetes LoadBalancer ingresses and services |
@@ -36,14 +47,37 @@ Create the following IAM roles and policies using Promethium-provided templates.
 
 ---
 
-## 🧪 4. Role and Policy Validation
+## 🧪 4. Subnet Tagging
+
+The subnets that will support the EKS cluster need to have a series of tags. The tags are 
+
+| Key | Value |
+| --- | ----- |
+| promethium-datafabric-prod-<company_name>-eks-cluster | owned |
+| kubernetes.io/role/internal-elb | 1 |
+
+The utility [tag_subnets.sh](utilities/tag_subnets.sh) will apply these tags.
+
+### 🚀 Usage
+
+`./tag-subnets.sh <vpc_id> <region> <company_name>`
+
+| Parameter | Description | Example |
+| --------- | ----------- | ------- |
+| vpc_id | The ID of the VPC | vpc-0abc123de456fghij |
+| region | The AWS region the VPC is located in | us-east-1 |
+| company_name | The variable <company_name> that is used through this install process | acme |
+
+---
+
+## 🧪 5. Role and Policy Validation
 
 The following utilities can be used to verify that the roles created have the requisite permissions to execute the installation process.
 
-| Utility                                           | Purpose         |
+| Utility | Purpose |
 |------------------------------------------------|---------------|
-| update-policies.sh        | Update the role and trust policies with account and region details         |
-| tf_install_role_verifier.py    | Verifies permissions associated with PromethiumInstall role                 |
-| promethium_app_role_verifier.py | Verifies roles needed for Promethium Intelligent Edge functioning         |
+| update-policies.sh | Update the role and trust policies with account and region details |
+| tf_install_role_verifier.py | Verifies permissions associated with PromethiumInstall role |
+| promethium_app_role_verifier.py | Verifies roles needed for Promethium Intelligent Edge functioning |
 
 ---
