@@ -21,7 +21,8 @@
                 "eks:DescribeUpdate",
                 "eks:TagResource",
                 "eks:UpdateNodegroupConfig",
-                "eks:DescribeCluster"
+                "eks:DescribeCluster",
+                "eks-auth:AssumeRoleForPodIdentity"
             ],
             "Resource": [
                 "arn:aws:eks:<region>:<account_id>:cluster/promethium*",
