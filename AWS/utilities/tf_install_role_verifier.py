@@ -75,7 +75,7 @@ class PolicyVerifier:
             "EC2 Policy": "promethium-terraform-ec2-policy.json", 
             "EFS Policy": "promethium-terraform-efs-policy.json",
             "EKS Policy": "promethium-terraform-eks-policy.json",
-            "ELB Policy": "promethium-terraform-elb-permission.json",
+            "ELB Policy": "promethium-terraform-elb-policy.json",
             "Glue Policy": "promethium-terraform-glue-policy.json",
             #"IAM Policy": "promethium-terraform-iam-policy",
             "S3 Policy": "promethium-terraform-s3-policy.json",
