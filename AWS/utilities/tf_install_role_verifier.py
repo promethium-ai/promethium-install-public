@@ -71,15 +71,15 @@ class PolicyVerifier:
     def get_required_policies(self) -> Dict[str, Dict]:
         """Load all required policies from filesystem"""
         policy_files = {
-            "ACM Policy": "promethium-terraform-acm-policy",
-            "EC2 Policy": "promethium-terraform-ec2-policy", 
-            "EFS Policy": "promethium-terraform-efs-policy",
-            "EKS Policy": "promethium-terraform-eks-policy",
-            "ELB Policy": "promethium-terraform-elb-permissions",
-            "Glue Policy": "promethium-terraform-glue-policy",
+            "ACM Policy": "promethium-terraform-acm-policy.json",
+            "EC2 Policy": "promethium-terraform-ec2-policy.json", 
+            "EFS Policy": "promethium-terraform-efs-policy.json",
+            "EKS Policy": "promethium-terraform-eks-policy.json",
+            "ELB Policy": "promethium-terraform-elb-permission.json",
+            "Glue Policy": "promethium-terraform-glue-policy.json",
             #"IAM Policy": "promethium-terraform-iam-policy",
-            "S3 Policy": "promethium-terraform-s3-policy",
-            "VPC Network Policy": "promethium-terraform-vpc-network-policy",
+            "S3 Policy": "promethium-terraform-s3-policy.json",
+            "VPC Network Policy": "promethium-terraform-vpc-network-policy.json",
         }
         
         policies = {}
