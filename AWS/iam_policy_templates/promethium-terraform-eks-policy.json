@@ -15,9 +15,7 @@
                 "eks:ListFargateProfiles",
                 "eks:TagResource",
                 "eks:ListTagsForResource",
-                "eks:UntagResource",
-                "eks:CreateNodegroup",
-                "eks:ListNodegroups"
+                "eks:UntagResource"
             ],
             "Resource": [
                 "arn:aws:eks:<region>:<account_id>:cluster/promethium*"
@@ -35,7 +33,8 @@
                 "eks:UpdateNodegroupVersion",
                 "eks:UpdateNodegroupConfig",
                 "eks:DescribeNodegroup",
-                "eks:DeleteNodegroup"
+                "eks:DeleteNodegroup",
+                "eks-auth:AssumeRoleForPodIdentity"
             ],
             "Resource": [
                 "arn:aws:eks:<region>:<account_id>:nodegroup/promethium*/*/*"

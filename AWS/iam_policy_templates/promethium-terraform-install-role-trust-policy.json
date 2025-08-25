@@ -4,9 +4,7 @@
         {
             "Effect": "Allow",
             "Principal": {
-                "AWS": [
-                  "<install_box_instance_profile_role_arn>"
-                ]
+                "Service": "ec2.amazonaws.com"
             },
             "Action": "sts:AssumeRole"
         }

@@ -71,15 +71,15 @@ class PolicyVerifier:
     def get_required_policies(self) -> Dict[str, Dict]:
         """Load all required policies from filesystem"""
         policy_files = {
-            "ACM Policy": "promethium-terraform-acm-policy",
-            "EC2 Policy": "promethium-terraform-ec2-policy", 
-            "EFS Policy": "promethium-terraform-efs-policy",
-            "EKS Policy": "promethium-terraform-eks-policy",
-            "ELB Policy": "promethium-terraform-elb-permissions",
-            "Glue Policy": "promethium-terraform-glue-policy",
+            "ACM Policy": "promethium-terraform-acm-policy.json",
+            "EC2 Policy": "promethium-terraform-ec2-policy.json", 
+            "EFS Policy": "promethium-terraform-efs-policy.json",
+            "EKS Policy": "promethium-terraform-eks-policy.json",
+            "ELB Policy": "promethium-terraform-elb-policy.json",
+            "Glue Policy": "promethium-terraform-glue-policy.json",
             #"IAM Policy": "promethium-terraform-iam-policy",
-            "S3 Policy": "promethium-terraform-s3-policy",
-            "VPC Network Policy": "promethium-terraform-vpc-network-policy",
+            "S3 Policy": "promethium-terraform-s3-policy.json",
+            "VPC Network Policy": "promethium-terraform-vpc-network-policy.json",
         }
         
         policies = {}
@@ -90,7 +90,7 @@ class PolicyVerifier:
 
     def get_required_trust_policy(self) -> Dict:
         """Load the required trust policy from filesystem"""
-        return self.load_policy_from_file("promethium-terraform-install-role-trust-policy")
+        return self.load_policy_from_file("promethium-terraform-install-role-trust-policy.json")
 
     def get_role_policies(self, role_name: str) -> Tuple[List[Dict], List[Dict]]:
         """Get all policies attached to a role (managed and inline)"""

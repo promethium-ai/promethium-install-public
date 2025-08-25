@@ -1,0 +1,69 @@
+installer:
+  simulate_actions:
+    - iam:CreateRole
+    - iam:AttachRolePolicy
+    - iam:PutRolePolicy
+    - iam:PassRole
+    - iam:CreateInstanceProfile
+    - iam:AddRoleToInstanceProfile
+    - eks:*
+    - ec2:*
+    - elasticloadbalancing:*
+    - autoscaling:*
+    - ecr:*
+    - acm:*
+    - kms:*
+    - s3:*
+    - logs:*
+    - glue:*
+    - sts:AssumeRole
+
+eks:
+  cluster:
+    trust_principals:
+      - eks.amazonaws.com
+    required_attached_suffixes: []
+  worker:
+    trust_principals:
+      - ec2.amazonaws.com
+    required_attached_suffixes:
+      - promethium-eks-kms-access-policy
+    actions:
+      - kms:Encrypt
+      - kms:Decrypt
+      - kms:ReEncrypt*
+      - kms:GenerateDataKey*
+      - kms:DescribeKey
+    forbidden_actions:
+      - kms:CreateGrant
+      - kms:ListGrants
+      - kms:RevokeGrant
+
+jumpbox:
+  require_instance_profile: true
+
+oidc:
+  roles:
+    lbcontroller:
+      required_attached_suffixes:
+        - lbcontroller-policy
+      expected_subject_contains: aws-load-balancer-controller
+    autoscaler:
+      required_attached_suffixes:
+        - eks-autoscaler-policy
+      expected_subject_contains: cluster-autoscaler
+    efs_csi_driver:
+      required_attached_suffixes:
+        - efs-csi-policy
+      expected_subject_contains: efs-csi-controller-sa
+    ebs_csi_driver:
+      required_attached_suffixes:
+        - ebs-csi-policy
+      expected_subject_contains: ebs-csi-controller-sa
+    pgbackup:
+      required_attached_suffixes:
+        - s3-access-policy
+      expected_subject_contains: pgbackup
+    trino:
+      required_attached_suffixes: []
+      expected_subject_contains: trino

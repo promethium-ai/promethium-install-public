@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # Usage:
-# ./replace_placeholders.sh account_id=... region=... company_name=... [eks_oidc_id=...] [policies_dir=...]
+# ./replace_placeholders.sh account_id=... region=... company_name=... policies_dir=... [eks_oidc_id=...] 
 
 # Initialize variables
 ACCOUNT_ID=""
 REGION=""
 COMPANY_NAME=""
 EKS_OIDC_ID=""
-POLICIES_DIR="."
+POLICIES_DIR=""
 
 # Parse key=value arguments
 for ARG in "$@"; do
@@ -22,24 +22,24 @@ for ARG in "$@"; do
     company_name=*)
       COMPANY_NAME="${ARG#*=}"
       ;;
-    eks_oidc_id=*)
-      EKS_OIDC_ID="${ARG#*=}"
-      ;;
     policies_dir=*)
       POLICIES_DIR="${ARG#*=}"
       ;;
+    eks_oidc_id=*)
+      EKS_OIDC_ID="${ARG#*=}"
+      ;;
     *)
       echo "Unknown argument: $ARG"
-      echo "Usage: $0 account_id=... region=... company_name=... [eks_oidc_id=...] [policies_dir=...]"
+      echo "Usage: $0 account_id=... region=... company_name=... policies_dir=... [eks_oidc_id=...]"
       exit 1
       ;;
   esac
 done
 
 # Validate required parameters
-if [[ -z "$ACCOUNT_ID" || -z "$REGION" || -z "$COMPANY_NAME" ]]; then
+if [[ -z "$ACCOUNT_ID" || -z "$REGION" || -z "$COMPANY_NAME" || -z "$POLICIES_DIR" ]]; then
   echo "Missing required arguments."
-  echo "Usage: $0 account_id=... region=... company_name=... [eks_oidc_id=...] [policies_dir=...]"
+  echo "Usage: $0 account_id=... region=... company_name=... policies_dir=... [eks_oidc_id=...]"
   exit 1
 fi
 
@@ -50,11 +50,13 @@ if [ ! -d "$POLICIES_DIR" ]; then
 fi
 
 # Create output directory named after the company
-OUTPUT_DIR="./${COMPANY_NAME}"
+POLICIES_PARENT=$(dirname "$POLICIES_DIR")
+OUTPUT_DIR="${POLICIES_PARENT}/${COMPANY_NAME}"
 mkdir -p "$OUTPUT_DIR"
 
+
 # Find all matching policy files
-FILES=$(find "$POLICIES_DIR" -maxdepth 1 -type f -name '*policy.json')
+FILES=$(find "$POLICIES_DIR" -maxdepth 1 -type f -name '*.json')
 
 if [ -z "$FILES" ]; then
   echo "No matching policy files found in '$POLICIES_DIR'."

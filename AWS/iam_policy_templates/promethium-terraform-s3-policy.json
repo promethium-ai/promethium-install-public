@@ -2,7 +2,7 @@
     "Version": "2012-10-17",
     "Statement": [
         {
-            "Sid": "S3BucketManagement",
+            "Sid": "VisualEditor0",
             "Effect": "Allow",
             "Action": [
                 "s3:CreateBucket",
@@ -78,6 +78,7 @@
                 "kms:GenerateDataKey",
                 "kms:Decrypt",
                 "kms:Encrypt",
+                "kms:GenerateDataKey",
                 "kms:DescribeKey",
                 "kms:ReEncryptTo",
                 "kms:ReEncryptFrom"
@@ -96,33 +97,6 @@
                 "arn:aws:kms:<region>:<account_id>:alias/*",
                 "arn:aws:kms:*:<account_id>:key/*"
             ]
-        },
-        {
-            "Sid": "KMS_KeyAccess",
-            "Effect": "Allow",
-            "Action": [
-                "kms:EnableKeyRotation",
-                "kms:EnableKey",
-                "kms:Decrypt",
-                "kms:ListKeyPolicies",
-                "kms:UntagResource",
-                "kms:PutKeyPolicy",
-                "kms:GetKeyPolicy",
-                "kms:Verify",
-                "kms:ListResourceTags",
-                "kms:DisableKey",
-                "kms:DisableKeyRotation",
-                "kms:TagResource",
-                "kms:Encrypt",
-                "kms:GetKeyRotationStatus",
-                "kms:ScheduleKeyDeletion",
-                "kms:DescribeKey",
-                "kms:Sign"
-            ],
-            "Resource": [
-                "arn:aws:kms:*:<account_id>:key/*"
-            ]
         }
-    ],
-    "Resource": "*"
+    ]
 }

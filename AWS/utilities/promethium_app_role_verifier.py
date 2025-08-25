@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AWS IAM Role Verification Script for Promethium EKS Roles
+AWS IAM Role Verification Script for Promethium IE Roles
 
 This script verifies seven roles:
 1. promethium-ebscsi-role with trust policy, AWS managed policy AmazonEBSCSIDriverPolicy, 
@@ -268,7 +268,7 @@ class AutoscalerRoleVerifier(RoleVerifier):
         self.eks_oidc_id = eks_oidc_id
         self.eks_cluster_name = eks_cluster_name
         self.company_name = company_name
-        self.role_name = "promethium-eks-autoscaler-role.json"
+        self.role_name = "promethium-eks-autoscaler-role"
         self.aws_managed_policy = None
         self.customer_policy = "promethium-eks-autoscaler-policy"
         self.trust_policy_file = trust_policy_file or "promethium-eks-autoscaler-role-trust-policy.json"
