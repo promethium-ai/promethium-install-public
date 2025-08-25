@@ -24,27 +24,36 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Check IAM permissions for Promethium IE installation.\n\n"
                     "Example:\n"
-                    "  python promethium_iam_check.py arn:aws:iam::734236616923:role/promethium-terraform-aws-provider-ie-role us-east-1 all",
+                    "  python promethium_iam_check.py arn:aws:iam::734236616923:role/promethium-terraform-aws-provider-ie-role dev us-east-1 all",
         formatter_class=argparse.RawTextHelpFormatter
     )
     parser.add_argument("arn", help="IAM role/user/group ARN")
+    parser.add_argument("profile", help="AWS profile name")
     parser.add_argument("region", help="AWS region")
     parser.add_argument("policy", help="'all', a file path, or '*' for all policies")
-    parser.add_argument("--granular", action="store_true", help="Granular per action check (instead of per group)")
+    parser.add_argument("--group", action="store_true", help="Group wide action check (instead of granular)")
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
     return parser.parse_args()
 
-def get_account_id(arn):
-    m = re.match(r"^arn:aws:iam::([0-9]{12}):role/", arn)
+def validate_arn(arn):
+    m = re.match(r"^arn:aws:iam::[0-9]{12}:(role|user|group)/", arn)
     if not m:
         print(f"Invalid ARN format: {arn}")
         sys.exit(1)
+    return arn
+
+def get_account_id(arn):
+    m = re.match(r"^arn:aws:iam::[0-9]{12}:(role|user|group)/", arn)
+    if not m:
+            print(f"Invalid ARN format: {arn}")
+            sys.exit(1)
     return m.group(1)
 
 def validate_region(region):
     if not re.match(r"^[a-z]{2}-[a-z]+-[0-9]$", region):
         print(f"Invalid region: {region}")
         sys.exit(1)
+    return region
 
 def find_policy_files(policy):
     if policy in ("*", "all"):
@@ -70,12 +79,13 @@ def load_json_file(path):
             print(f"Invalid JSON in policy file: {path}: {e}")
             sys.exit(2)
 
-def run_aws_simulate(region, role_arn, action, resource, context_entries=None, debug=False):
+def run_aws_simulate(profile, region, role_arn, action, resource, context_entries=None, debug=False):
     '''
     Call CLI: aws iam simulate-principal-policy
     '''
     cmd = [
         "aws", "iam", "simulate-principal-policy",
+        "--profile", profile,
         "--region", region,
         "--policy-source-arn", role_arn,
         "--action-names", action,
@@ -100,11 +110,12 @@ def run_aws_simulate(region, role_arn, action, resource, context_entries=None, d
             print(f"ERROR: failed aws iam command: {result.returncode}")
             sys.exit(5)
 
-def run_aws_simulate_boto3(region, role_arn, actions, resource, context_entries=None, debug=False):
+def run_aws_simulate_boto3(profile, region, role_arn, actions, resource, context_entries=None, debug=False):
     '''
     Call SDK: simulate IAM policy using boto3.
     '''
-    client = boto3.client("iam", region_name=region)
+    session = boto3.Session(profile_name=profile)
+    client = session.client("iam", region_name=region)
     params = {
         "PolicySourceArn": role_arn,
         "ActionNames": actions,
@@ -138,16 +149,15 @@ def main():
     Main function to check IAM permissions for Promethium IE installation.
     '''
     args = parse_args()
-    role_arn = args.arn
-    region = args.region
+    role_arn = validate_arn(args.arn)
+    profile = args.profile
+    region = validate_region(args.region)
     policy = args.policy
-    group = not args.granular
+    group = args.group
     debug = args.debug
 
     account_id = get_account_id(role_arn)
-    validate_region(region)
-
-    print(f"Checking IAM permissions for: {role_arn} in region: {region} with policy: {policy}")
+    print(f"Checking IAM permissions for profile {profile} for role {role_arn} in region {region} with policy: {policy}")
 
     allowed = []
     denied = []
@@ -248,7 +258,7 @@ def main():
                             sys.exit(2)
 
                         # Run the AWS IAM policy simulation
-                        response = run_aws_simulate_boto3(region, role_arn, [action], resource, context_entries, debug)
+                        response = run_aws_simulate_boto3(profile, region, role_arn, [action], resource, context_entries, debug)
                         try:
                             jresults = response["EvaluationResults"][0]["EvalDecision"]
                         except Exception as e:
