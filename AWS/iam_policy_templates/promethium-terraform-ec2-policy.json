@@ -67,7 +67,9 @@
             "Effect": "Allow",
             "Action": "sts:AssumeRole",
             "Resource":
-"arn:aws:iam::734236616923:role/promethium-terraform-saas-assume-role"
+                       ["arn:aws:iam::734236616923:role/promethium-terraform-saas-assume-role",
+                      "arn:aws:iam::<account_id>:role/promethium-terraform-saas-assume-role"]
+
         },
         {
             "Sid": "SSMParameter",

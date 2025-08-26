@@ -39,6 +39,25 @@
                 "eks:CreateCluster"
             ],
             "Resource": "arn:aws:eks:<region>:<account_id>:cluster/*"
+        },
+        {
+            "Sid": "IAMServiceLinkedRole",
+            "Effect": "Allow",
+            "Action": [
+                "iam:CreateServiceLinkedRole",
+                "iam:DeleteServiceLinkedRole"
+            ],
+            "Resource": "*",
+            "Condition": {
+                "StringEquals": {
+                    "iam:AWSServiceName": [
+                        "eks.amazonaws.com",
+                        "glue.amazonaws.com",
+                        "eks-nodegroup.amazonaws.com",
+                        "eks-addons.amazonaws.com"
+                    ]
+                }
+            }
         }
     ]
 }
