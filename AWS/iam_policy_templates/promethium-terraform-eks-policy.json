@@ -28,7 +28,8 @@
             "Resource": [
                 "arn:aws:eks:<region>:<account_id>:cluster/promethium*",
                 "arn:aws:eks:<region>:<account_id>:nodegroup/promethium*/*/*",
-                "arn:aws:iam::<account_id>:role/promethium-eks-cluster-role"
+                "arn:aws:iam::<account_id>:role/promethium-eks-cluster-role",
+                "arn:aws:iam::<account_id>:role/promethium-eks-worker-role"
             ]
         },
         {
