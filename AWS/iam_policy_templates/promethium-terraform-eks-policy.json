@@ -61,6 +61,13 @@
                     ]
                 }
             }
-        }
+        },
+        {
+			"Sid": "IAMGetRoleForEKS",
+			"Effect": "Allow",
+			"Action": "iam:GetRole",
+			"Resource": "*"
+		}
+        
     ]
 }
