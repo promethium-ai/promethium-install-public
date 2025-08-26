@@ -24,7 +24,8 @@
                 "eks:DescribeCluster",
                 "eks-auth:AssumeRoleForPodIdentity",
                 "iam:PassRole",
-                "iam:GetRole"
+                "iam:GetRole",
+                "iam:ListAttachedRolePolicies"
             ],
             "Resource": [
                 "arn:aws:eks:<region>:<account_id>:cluster/promethium*",
