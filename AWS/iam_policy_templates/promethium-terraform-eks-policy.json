@@ -22,11 +22,13 @@
                 "eks:TagResource",
                 "eks:UpdateNodegroupConfig",
                 "eks:DescribeCluster",
-                "eks-auth:AssumeRoleForPodIdentity"
+                "eks-auth:AssumeRoleForPodIdentity",
+                "iam:PassRole"
             ],
             "Resource": [
                 "arn:aws:eks:<region>:<account_id>:cluster/promethium*",
-                "arn:aws:eks:<region>:<account_id>:nodegroup/promethium*/*/*"
+                "arn:aws:eks:<region>:<account_id>:nodegroup/promethium*/*/*",
+                "arn:aws:iam::<account_id>:role/promethium-eks-cluster-role"
             ]
         },
         {
