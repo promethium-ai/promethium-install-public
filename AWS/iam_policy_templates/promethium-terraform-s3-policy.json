@@ -38,7 +38,7 @@
                 "kms:DeleteAlias"
             ],
             "Resource": [
-                "arn:aws:kms:us-east-1:<account_id>:alias/*",
+                "arn:aws:kms:<REGION>:<account_id>:alias/*",
                 "arn:aws:kms:*:<account_id>:key/*"
             ]
         },
