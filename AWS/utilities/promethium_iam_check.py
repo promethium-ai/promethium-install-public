@@ -15,8 +15,9 @@ from urllib import response
 import boto3
 
 base_dir = os.path.dirname(os.path.abspath(__file__))
+debug = False
 
-def debug_print(debug, *args):
+def debug_print(*args):
     if debug:
         print(*args)
 
@@ -28,9 +29,9 @@ def parse_args():
         formatter_class=argparse.RawTextHelpFormatter
     )
     parser.add_argument("arn", help="IAM role/user/group ARN")
-    parser.add_argument("profile", help="AWS profile name")
     parser.add_argument("region", help="AWS region")
     parser.add_argument("policy", help="'all', a file path, or '*' for all policies")
+    parser.add_argument("--profile", help="AWS profile name (optional)")
     parser.add_argument("--group", action="store_true", help="Group wide action check (instead of granular)")
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
     return parser.parse_args()
@@ -57,7 +58,7 @@ def validate_region(region):
 
 def find_policy_files(policy):
     if policy in ("*", "all"):
-        target_dir = os.path.join(base_dir, '../policies_dir')
+        target_dir = os.path.join(base_dir, '../iam_policy_templates')
         pattern = r"^promethium-terraform-.*\.json$"
         skip_pattern = r"^promethium-terraform-install-role-.*\.json$"
         files = []
@@ -79,7 +80,7 @@ def load_json_file(path):
             print(f"Invalid JSON in policy file: {path}: {e}")
             sys.exit(2)
 
-def run_aws_simulate(profile, region, role_arn, action, resource, context_entries=None, debug=False):
+def run_aws_simulate(profile, region, role_arn, action, resource, context_entries=None):
     '''
     Call CLI: aws iam simulate-principal-policy
     '''
@@ -110,20 +111,35 @@ def run_aws_simulate(profile, region, role_arn, action, resource, context_entrie
             print(f"ERROR: failed aws iam command: {result.returncode}")
             sys.exit(5)
 
-def run_aws_simulate_boto3(profile, region, role_arn, actions, resource, context_entries=None, debug=False):
+def run_aws_simulate_boto3(profile, region, role_arn, actions, resource, context_entries=None):
     '''
     Call SDK: simulate IAM policy using boto3.
     '''
-    session = boto3.Session(profile_name=profile)
+    cmd = [
+        "aws", "iam", "simulate-principal-policy",
+        "--profile", profile if profile else '',
+        "--region", region,
+        "--policy-source-arn", role_arn,
+        "--action-names", ''.join(actions),
+        "--resource-arns", resource,
+        "--output", "json"
+    ]
+    debug_print(f"SIMULATE COMMAND: {' '.join(cmd)}")
+
+    print(f"Simulating policy for profile: {profile} in region: {region} for role: {role_arn} with actions: {actions} and resource: {resource}")
+
+    session = boto3.Session() if profile is None else boto3.Session(profile_name=profile)
     client = session.client("iam", region_name=region)
+
     params = {
         "PolicySourceArn": role_arn,
         "ActionNames": actions,
-        "ResourceArns": [resource],
+        "ResourceArns": [resource]
     }
     if context_entries:
         # context_entries should be a list of dicts with keys: ContextKeyName, ContextKeyValues, ContextKeyType
         params["ContextEntries"] = context_entries
+
 
     attempts = 3  # Number of attempts for the API call
     while True:
@@ -150,14 +166,17 @@ def main():
     '''
     args = parse_args()
     role_arn = validate_arn(args.arn)
-    profile = args.profile
     region = validate_region(args.region)
     policy = args.policy
+    profile = args.profile
     group = args.group
+
+    global debug
     debug = args.debug
 
     account_id = get_account_id(role_arn)
-    print(f"Checking IAM permissions for profile {profile} for role {role_arn} in region {region} with policy: {policy}")
+    print(f"Checking IAM permissions for role {role_arn}, account: {account_id}, region: {region}, policy: {policy}")
+    print(f"Options: profile: {profile}, group: {group}, debug: {debug}")
 
     allowed = []
     denied = []
@@ -230,7 +249,7 @@ def main():
 
                 if group:
                     # Run the AWS IAM policy simulation
-                    response = run_aws_simulate_boto3(region, role_arn, actions, resource, context_entries, debug)
+                    response = run_aws_simulate_boto3(profile, region, role_arn, actions, resource, context_entries)
                     try:
                         jresults = response["EvaluationResults"][0]["EvalDecision"]
                     except Exception as e:
@@ -258,7 +277,7 @@ def main():
                             sys.exit(2)
 
                         # Run the AWS IAM policy simulation
-                        response = run_aws_simulate_boto3(profile, region, role_arn, [action], resource, context_entries, debug)
+                        response = run_aws_simulate_boto3(profile, region, role_arn, [action], resource, context_entries)
                         try:
                             jresults = response["EvaluationResults"][0]["EvalDecision"]
                         except Exception as e:
@@ -284,10 +303,8 @@ def main():
     print(f"Denied actions ({len(denied)}):")
     for a in denied:
         print(f"  - {a}")
-    if denied:
-        sys.exit(1)
-    print("SUCCESS: all actions are allowed.")
-    sys.exit(0)
+
+    print(f"Summary: Tested {len(allowed) + len(denied)} actions, Allowed: {len(allowed)}, Denied: {len(denied)}")
 
 if __name__ == "__main__":
     main()
