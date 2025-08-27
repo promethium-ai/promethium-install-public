@@ -48,7 +48,8 @@
             "Effect": "Allow",
             "Action": [
                 "iam:CreateServiceLinkedRole",
-                "iam:DeleteServiceLinkedRole"
+                "iam:DeleteServiceLinkedRole",
+                "iam:GetRole"
             ],
             "Resource": "*",
             "Condition": {
@@ -67,7 +68,16 @@
 			"Effect": "Allow",
 			"Action": "iam:GetRole",
 			"Resource": "*"
-		}
-        
+		},
+        {
+            "Effect": "Allow",
+            "Action": [
+                "iam:CreateOpenIDConnectProvider",
+                "iam:TagOpenIDConnectProvider",
+                "iam:GetOpenIDConnectProvider",
+                "iam:DeleteOpenIDConnectProvider"
+            ],
+            "Resource": "arn:aws:iam::<account_id>:oidc-provider/*"
+        }
     ]
 }
