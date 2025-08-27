@@ -87,31 +87,39 @@ The following utilities can be used to verify that the roles created have the re
 The [promethium_iam_check.py](./utilities/promethium_iam_check.py) utility checks IAM permissions required for Promethium IE installation. It simulates the policies for a given IAM role, user, or group and checks if the required actions are allowed on the specified resources.
 
 ```
-$ python ./utilities/promethium_iam_check.py <arn> <region> <policy> [--granular] [--debug]
+$ python promethium_iam_check.py arn region policy [-h] [--profile PROFILE] [--group] [--debug]
     <arn> is the AWS IAM role, user, or group
     <region> is the AWS region
-    <policy> is the specific IAM policy file (in json format) to test, or enter 'all' to test all policies in this repo.
-    --policy : a specific IAM policy file (in json format) to check instead of all policies in repo
-    --granular : option to runs the policy checker per action (instead of per group)
+    <policy> is the specific json IAM policy file to test, or enter 'all' to test all policies in this repo.
+    --profile : AWS profile name to select account settings
+    --group : runs the policy checker per action (instead of per group)
     --debug : enables debug output
 ```
 
-Example: run it with iam role in us-east-1, on the eks json policy file in this repo, with granular (per table) output:
+Example: run it with iam role in us-east-1, on the eks json policy file in this repo:
 
 ```
-python ./utilities/promethium_iam_check.py \
-  arn:aws:iam::734236616923:role/promethium-terraform-aws-provider-ie-role \
-  us-east-1 \
-  ./policies_dir/promethium-terraform-eks-policy.json \
-  --granular
+python promethium_iam_check.py \
+    arn:aws:iam::734236616923:role/promethium-terraform-aws-provider-ie-role \
+    us-east-1 \
+    ../iam_policy_templates/promethium-terraform-eks-policy.json
+
+...
+Denied actions (2):
+  - eks:ListUpdates on arn:aws:eks:us-east-1:role:cluster/promethium*
+  - eks:TagResource on arn:aws:eks:us-east-1:role:cluster/promethium*
+Summary: Tested 23 actions, Allowed: 21, Denied: 2
 ```
 
 Example: run it with iam role in us-east-1, on every json policy file in this repo:
 
 ```
-python ./utilities/promethium_iam_check.py \
-  arn:aws:iam::734236616923:role/promethium-terraform-aws-provider-ie-role \
-  us-east-1 \
-  all
-```
+python promethium_iam_check.py \
+    arn:aws:iam::646322277713:role/promethium-terraform-aws-provider-ie-role \
+    us-east-1 \
+    all \
+    --profile sandbox
 
+...
+Summary: Tested 263 actions, Allowed: 159, Denied: 104
+```
