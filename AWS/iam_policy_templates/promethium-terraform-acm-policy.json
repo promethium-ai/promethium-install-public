@@ -1,0 +1,26 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "ACMCertGetPermissions",
+            "Effect": "Allow",
+            "Action": [
+                "acm:RequestCertificate",
+                "acm:ListCertificates",
+                "acm:GetCertificate"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "ACMCertCreatePermissions",
+            "Effect": "Allow",
+            "Action": [
+                "acm:DeleteCertificate",
+                "acm:DescribeCertificate",
+                "acm:AddTagsToCertificate",
+                "acm:ListTagsForCertificate"
+            ],
+            "Resource": "arn:aws:acm:<region>:<account_id>:certificate/*"
+        }
+    ]
+}

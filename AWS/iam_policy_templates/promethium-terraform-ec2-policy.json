@@ -1,0 +1,83 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "EC2CoreActions",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:AttachVolume",
+                "ec2:CreateLaunchTemplate",
+                "ec2:CreateLaunchTemplateVersion",
+                "ec2:DeleteLaunchTemplate",
+                "ec2:CreateKeyPair",
+                "ec2:DeleteKeyPair",
+                "ec2:CreateVolume",
+                "ec2:AttachNetworkInterface",
+                "ec2:DetachNetworkInterface",
+                "ec2:DeleteNetworkInterface",
+                "ec2:ModifyInstanceAttribute",
+                "ec2:RunInstances",
+                "ec2:TerminateInstances",
+                "ec2:DetachVolume",
+                "ec2:CreateNetworkInterface"
+            ],
+            "Resource": [
+                "arn:aws:ec2:<region>:<account_id>:instance/*",
+                "arn:aws:ec2:<region>:<account_id>:launch-template/*",
+                "arn:aws:ec2:<region>:<account_id>:key-pair/*",
+                "arn:aws:ec2:<region>:<account_id>:volume/*",
+                "arn:aws:ec2:<region>:<account_id>:network-interface/*",
+                "arn:aws:ec2:<region>:<account_id>:security-group/*",
+                "arn:aws:ec2:<region>:<account_id>:subnet/*",
+                "arn:aws:ec2:<region>::image/*"
+            ]
+        },
+        {
+            "Sid": "EC2DescribeActions",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:DescribeInstances",
+                "ec2:DescribeInstanceStatus",
+                "ec2:DescribeInstanceAttribute",
+                "ec2:DescribeInstanceTypes",
+                "ec2:DescribeIamInstanceProfileAssociations",
+                "ec2:DescribeInstanceCreditSpecifications",
+                "ec2:DescribeVolumes",
+                "ec2:DescribeVolumesModifications",
+                "ec2:DescribeKeyPairs",
+                "ec2:DescribeLaunchTemplates",
+                "ec2:DescribeLaunchTemplateVersions",
+                "ec2:DescribeImages",
+                "ec2:DescribeNetworkInterfaces",
+                "ec2:DescribeTags"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "EC2Tagging",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:CreateTags",
+                "ec2:DeleteTags"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "STSPermissions",
+            "Effect": "Allow",
+            "Action": "sts:AssumeRole",
+            "Resource":
+                       ["arn:aws:iam::734236616923:role/promethium-terraform-saas-assume-role",
+                       "arn:aws:iam::308611924187:role/promethium-terraform-saas-assume-role"]
+
+        },
+        {
+            "Sid": "SSMParameter",
+            "Effect": "Allow",
+            "Action": [
+                "ssm:GetParameter"
+            ],
+            "Resource": "arn:aws:ssm:*::parameter/aws/service/eks/optimized-ami/*/amazon-linux-*/recommended/release_version"
+        }
+    ]
+}

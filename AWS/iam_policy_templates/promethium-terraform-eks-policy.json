@@ -1,0 +1,83 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "EKSPermissions",
+            "Effect": "Allow",
+            "Action": [
+                "eks:UpdateClusterVersion",
+                "eks:ListNodegroups",
+                "eks:UntagResource",
+                "eks:ListTagsForResource",
+                "eks:UpdateClusterConfig",
+                "eks:CreateNodegroup",
+                "eks:DeleteCluster",
+                "eks:CreateFargateProfile",
+                "eks:UpdateNodegroupVersion",
+                "eks:ListFargateProfiles",
+                "eks:DescribeNodegroup",
+                "eks:ListUpdates",
+                "eks:DeleteNodegroup",
+                "eks:DescribeUpdate",
+                "eks:TagResource",
+                "eks:UpdateNodegroupConfig",
+                "eks:DescribeCluster",
+                "eks-auth:AssumeRoleForPodIdentity",
+                "iam:PassRole",
+                "iam:GetRole",
+                "iam:ListAttachedRolePolicies"
+            ],
+            "Resource": [
+                "arn:aws:eks:<region>:<account_id>:cluster/promethium*",
+                "arn:aws:eks:<region>:<account_id>:nodegroup/promethium*/*/*",
+                "arn:aws:iam::<account_id>:role/promethium-eks-cluster-role",
+                "arn:aws:iam::<account_id>:role/promethium-eks-worker-role"
+            ]
+        },
+        {
+            "Sid": "EKSCreatePermissions",
+            "Effect": "Allow",
+            "Action": [
+                "eks:ListClusters",
+                "eks:CreateCluster"
+            ],
+            "Resource": "arn:aws:eks:<region>:<account_id>:cluster/*"
+        },
+        {
+            "Sid": "IAMServiceLinkedRole",
+            "Effect": "Allow",
+            "Action": [
+                "iam:CreateServiceLinkedRole",
+                "iam:DeleteServiceLinkedRole",
+                "iam:GetRole"
+            ],
+            "Resource": "*",
+            "Condition": {
+                "StringEquals": {
+                    "iam:AWSServiceName": [
+                        "eks.amazonaws.com",
+                        "glue.amazonaws.com",
+                        "eks-nodegroup.amazonaws.com",
+                        "eks-addons.amazonaws.com"
+                    ]
+                }
+            }
+        },
+        {
+			"Sid": "IAMGetRoleForEKS",
+			"Effect": "Allow",
+			"Action": "iam:GetRole",
+			"Resource": "*"
+		},
+        {
+            "Effect": "Allow",
+            "Action": [
+                "iam:CreateOpenIDConnectProvider",
+                "iam:TagOpenIDConnectProvider",
+                "iam:GetOpenIDConnectProvider",
+                "iam:DeleteOpenIDConnectProvider"
+            ],
+            "Resource": "arn:aws:iam::<account_id>:oidc-provider/*"
+        }
+    ]
+}

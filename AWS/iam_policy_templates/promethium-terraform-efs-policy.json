@@ -1,0 +1,32 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "EFSPermissions",
+            "Effect": "Allow",
+            "Action": [
+                "elasticfilesystem:ModifyMountTargetSecurityGroups",
+                "elasticfilesystem:DescribeMountTargets",
+                "elasticfilesystem:UntagResource",
+                "elasticfilesystem:CreateMountTarget",
+                "elasticfilesystem:DescribeLifecycleConfiguration",
+                "elasticfilesystem:DescribeAccessPoints",
+                "elasticfilesystem:DescribeFileSystems",
+                "elasticfilesystem:DeleteMountTarget",
+                "elasticfilesystem:DeleteFileSystem",
+                "elasticfilesystem:DescribeMountTargetSecurityGroups",
+                "elasticfilesystem:TagResource"
+            ],
+            "Resource": [
+                "arn:aws:elasticfilesystem:<region>:<account_id>:access-point/*",
+                "arn:aws:elasticfilesystem:<region>:<account_id>:file-system/*"
+            ]
+        },
+        {
+            "Sid": "EFSCreatePermissions",
+            "Effect": "Allow",
+            "Action": "elasticfilesystem:CreateFileSystem",
+            "Resource": "*"
+        }
+    ]
+}
