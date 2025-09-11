@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Usage:
-# ./replace_placeholders.sh account_id=... region=... company_name=... policies_dir=... [eks_oidc_id=...] 
+# ./replace_placeholders.sh account_id=... region=... company_name=... policies_dir=... [eks_oidc_id=...] [eks_cluster_name=...]
 
 # Initialize variables
 ACCOUNT_ID=""
@@ -9,6 +9,7 @@ REGION=""
 COMPANY_NAME=""
 EKS_OIDC_ID=""
 POLICIES_DIR=""
+EKS_CLUSTER_NAME=""
 
 # Parse key=value arguments
 for ARG in "$@"; do
@@ -28,9 +29,12 @@ for ARG in "$@"; do
     eks_oidc_id=*)
       EKS_OIDC_ID="${ARG#*=}"
       ;;
+    eks_cluster_name=*)
+      EKS_CLUSTER_NAME="${ARG#*=}"
+      ;;
     *)
       echo "Unknown argument: $ARG"
-      echo "Usage: $0 account_id=... region=... company_name=... policies_dir=... [eks_oidc_id=...]"
+      echo "Usage: $0 account_id=... region=... company_name=... policies_dir=... [eks_oidc_id=...] [eks_cluster_name=...]"
       exit 1
       ;;
   esac
@@ -39,7 +43,7 @@ done
 # Validate required parameters
 if [[ -z "$ACCOUNT_ID" || -z "$REGION" || -z "$COMPANY_NAME" || -z "$POLICIES_DIR" ]]; then
   echo "Missing required arguments."
-  echo "Usage: $0 account_id=... region=... company_name=... policies_dir=... [eks_oidc_id=...]"
+  echo "Usage: $0 account_id=... region=... company_name=... policies_dir=... [eks_oidc_id=...] [eks_cluster_name=...]"
   exit 1
 fi
 
@@ -71,17 +75,19 @@ for FILE in $FILES; do
 
   # Perform replacements
   MODIFIED=$(sed \
-    -e "s|<account_id>|$ACCOUNT_ID|g" \
-    -e "s|<ACCOUNT_ID>|$ACCOUNT_ID|g" \
-    -e "s|<region>|$REGION|g" \
-    -e "s|<REGION>|$REGION|g" \
-    -e "s|<company name>|$COMPANY_NAME|g" \
-    -e "s|<COMPANY NAME>|$COMPANY_NAME|g" \
+    -e "s|<account_id>|$ACCOUNT_ID|gI" \
+    -e "s|<region>|$REGION|gI" \
+    -e "s|<company name>|$COMPANY_NAME|gI" \
     "$FILE")
 
   # Optional EKS OIDC replacement
   if [[ -n "$EKS_OIDC_ID" ]]; then
-    MODIFIED=$(echo "$MODIFIED" | sed -e "s|<EKS_OIDC_ID>|$EKS_OIDC_ID|g")
+    MODIFIED=$(echo "$MODIFIED" | sed -e "s|<EKS_OIDC_ID>|$EKS_OIDC_ID|gI")
+  fi
+
+  # Optional EKS Cluster Name replacement
+  if [[ -n "$EKS_CLUSTER_NAME" ]]; then
+    MODIFIED=$(echo "$MODIFIED" | sed -e "s|<EKS_CLUSTER_NAME>|$EKS_CLUSTER_NAME|gI")
   fi
 
   echo "$MODIFIED" > "$NEWFILE"

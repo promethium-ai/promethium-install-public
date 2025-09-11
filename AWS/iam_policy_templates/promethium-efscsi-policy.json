@@ -16,7 +16,7 @@
             ],
             "Condition": {
                 "StringLike": {
-                    "aws:RequestTag/cluster-name": "promethium-datafabric-prod-<COMPANY NAME>-eks-cluster",
+                    "aws:RequestTag/cluster-name": "<EKS_CLUSTER_NAME>",
                     "aws:RequestTag/efs.csi.aws.com/cluster": "true"
                 }
             },
@@ -27,7 +27,7 @@
             "Action": "elasticfilesystem:DeleteAccessPoint",
             "Condition": {
                 "StringLike": {
-                    "aws:RequestTag/cluster-name": "promethium-datafabric-prod-<COMPANY NAME>-eks-cluster",
+                    "aws:RequestTag/cluster-name": "<EKS_CLUSTER_NAME>",
                     "aws:RequestTag/efs.csi.aws.com/cluster": "true"
                 }
             },

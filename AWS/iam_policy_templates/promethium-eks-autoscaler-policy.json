@@ -7,7 +7,7 @@
             ],
             "Condition": {
                 "StringEquals": {
-                    "aws:ResourceTag/k8s.io/cluster-autoscaler/<eks_cluster_name>": "owned"
+                    "aws:ResourceTag/k8s.io/cluster-autoscaler/<EKS_CLUSTER_NAME>": "owned"
                 }
             },
             "Effect": "Allow",
