@@ -1,0 +1,35 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "EFSFileSystemManagement",
+            "Effect": "Allow",
+            "Action": [
+                "elasticfilesystem:CreateFileSystem",
+                "elasticfilesystem:DeleteFileSystem",
+                "elasticfilesystem:DescribeFileSystems",
+                "elasticfilesystem:CreateAccessPoint",
+                "elasticfilesystem:DeleteAccessPoint",
+                "elasticfilesystem:DescribeAccessPoints",
+                "elasticfilesystem:CreateMountTarget",
+                "elasticfilesystem:DeleteMountTarget",
+                "elasticfilesystem:DescribeMountTargets",
+                "elasticfilesystem:TagResource"
+            ],
+            "Resource": [
+                "arn:aws:elasticfilesystem:${AWS_REGION}:${AWS_ACCOUNT_ID}:access-point/*",
+                "arn:aws:elasticfilesystem:${AWS_REGION}:${AWS_ACCOUNT_ID}:file-system/*"
+            ]
+        },
+        {
+            "Sid": "EFSDescribePermissions",
+            "Effect": "Allow",
+            "Action": [
+                "elasticfilesystem:DescribeFileSystems",
+                "elasticfilesystem:DescribeAccessPoints",
+                "elasticfilesystem:DescribeMountTargets"
+            ],
+            "Resource": "*"
+        }
+    ]
+}
