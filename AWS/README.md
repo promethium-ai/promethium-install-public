@@ -73,6 +73,5 @@ The following utilities can be used to verify that the roles created have the re
 |------------------------------------------------|---------------|
 | update-policies.sh | Update the role and trust policies with account and region details |
 | tf_install_role_verifier.py | Verifies permissions associated with PromethiumInstall role |
-| promethium_app_role_verifier.py | Verifies roles needed for Promethium Intelligent Edge functioning |
 
 ---
