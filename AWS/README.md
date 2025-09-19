@@ -53,7 +53,7 @@ The subnets that will support the EKS cluster need to have a series of tags. The
 
 | Key | Value |
 | --- | ----- |
-| promethium-datafabric-prod-<company_name>-eks-cluster | owned |
+| kubernetes.io/cluster/${CLUSTER_NAME} | owned |
 | kubernetes.io/role/internal-elb | 1 |
 
 The utility [tag_subnets.sh](utilities/tag_subnets.sh) will apply these tags.
