@@ -1,0 +1,44 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "GlueDatabaseManagement",
+            "Effect": "Allow",
+            "Action": [
+                "glue:CreateDatabase",
+                "glue:DeleteDatabase",
+                "glue:UpdateDatabase",
+                "glue:GetDatabase",
+                "glue:GetDatabases"
+            ],
+            "Resource": [
+                "arn:aws:glue:*:${AWS_ACCOUNT_ID}:database/*_trino",
+                "arn:aws:glue:*:${AWS_ACCOUNT_ID}:database/*_trino*/*",
+                "arn:aws:glue:*:${AWS_ACCOUNT_ID}:table/*trino*/*",
+                "arn:aws:glue:*:${AWS_ACCOUNT_ID}:userDefinedFunction/*trino*/*",
+                "arn:aws:glue:*:${AWS_ACCOUNT_ID}:catalog"
+            ]
+        },
+        {
+            "Sid": "GlueCatalogAccess",
+            "Effect": "Allow",
+            "Action": [
+                "glue:GetTags",
+                "glue:TagResource"
+            ],
+            "Resource": [
+                "arn:aws:glue:*:${AWS_ACCOUNT_ID}:catalog",
+                "arn:aws:glue:*:${AWS_ACCOUNT_ID}:database/*_trino"
+            ]
+        },
+        {
+            "Sid": "GlueReadOnlyAccess",
+            "Effect": "Allow",
+            "Action": [
+                "glue:GetDatabase",
+                "glue:GetDatabases"
+            ],
+            "Resource": "*"
+        }
+    ]
+}

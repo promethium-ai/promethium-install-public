@@ -1,0 +1,74 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "EKSPermissions",
+            "Effect": "Allow",
+            "Action": [
+                "eks:UpdateClusterVersion",
+                "eks:ListNodegroups",
+                "eks:UntagResource",
+                "eks:ListTagsForResource",
+                "eks:UpdateClusterConfig",
+                "eks:CreateNodegroup",
+                "eks:DeleteCluster",
+                "eks:CreateFargateProfile",
+                "eks:UpdateNodegroupVersion",
+                "eks:ListFargateProfiles",
+                "eks:DescribeNodegroup",
+                "eks:ListUpdates",
+                "eks:DeleteNodegroup",
+                "eks:DescribeUpdate",
+                "eks:TagResource",
+                "eks:UpdateNodegroupConfig",
+                "eks:DescribeCluster",
+                "eks-auth:AssumeRoleForPodIdentity",
+                "iam:PassRole",
+                "iam:GetRole",
+                "iam:ListAttachedRolePolicies"
+            ],
+            "Resource": [
+                "arn:aws:eks:${AWS_REGION}:${AWS_ACCOUNT_ID}:cluster/promethium*",
+                "arn:aws:eks:${AWS_REGION}:${AWS_ACCOUNT_ID}:nodegroup/promethium*/*/*",
+                "arn:aws:iam::${AWS_ACCOUNT_ID}:role/promethium-eks-cluster-role",
+                "arn:aws:iam::${AWS_ACCOUNT_ID}:role/promethium-eks-worker-role"
+            ]
+        },
+        {
+            "Sid": "EKSClusterCreation",
+            "Effect": "Allow",
+            "Action": [
+                "eks:DescribeCluster",
+                "eks:ListClusters",
+                "eks:CreateCluster"
+            ],
+            "Resource": "arn:aws:eks:${AWS_REGION}:${AWS_ACCOUNT_ID}:cluster/*"
+        },
+        {
+            "Sid": "IAMServiceLinkedRole",
+            "Effect": "Allow",
+            "Action": [
+                "iam:CreateServiceLinkedRole"
+            ],
+            "Resource": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/aws-service-role/eks.amazonaws.com/AWSServiceRoleForAmazonEKS*",
+            "Condition": {
+                "StringEquals": {
+                    "iam:AWSServiceName": "eks.amazonaws.com"
+                }
+            }
+        },
+        {
+            "Sid": "IAMServiceLinkedRoleNodegroup",
+            "Effect": "Allow",
+            "Action": [
+                "iam:CreateServiceLinkedRole"
+            ],
+            "Resource": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/aws-service-role/eks-nodegroup.amazonaws.com/AWSServiceRoleForAmazonEKSNodegroup*",
+            "Condition": {
+                "StringEquals": {
+                    "iam:AWSServiceName": "eks-nodegroup.amazonaws.com"
+                }
+            }
+        }
+    ]
+}
