@@ -55,7 +55,7 @@ The utility [tag_subnets.sh](utilities/tag_subnets.sh) will apply these tags.
 
 ### 🚀 Usage
 
-`./tag-subnets.sh <vpc_id> <region> <company_name>`
+`./tag-subnets.sh <vpc_id> <region> <company_name> [cluster_name]`
 
 | Parameter | Description | Example |
 | --------- | ----------- | ------- |
