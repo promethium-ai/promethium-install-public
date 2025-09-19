@@ -71,7 +71,6 @@ The following utilities can be used to verify that the roles created have the re
 
 | Utility | Purpose |
 |------------------------------------------------|---------------|
-| update-policies.sh | Update the role and trust policies with account and region details |
-| tf_install_role_verifier.py | Verifies permissions associated with PromethiumInstall role |
+| verify_iam_setup.py | Verifies permissions associated with PromethiumInstall role |
 
 ---
