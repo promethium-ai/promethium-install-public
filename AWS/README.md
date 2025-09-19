@@ -71,6 +71,6 @@ The following utilities can be used to verify that the roles created have the re
 
 | Utility | Purpose |
 |------------------------------------------------|---------------|
-| verify_iam_setup.py | Verifies permissions associated with PromethiumInstall role |
+| [verify_iam_setup.py](utilities/checker/README.md) | Verifies permissions associated with PromethiumInstall role |
 
 ---
