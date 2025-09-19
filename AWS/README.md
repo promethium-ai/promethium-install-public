@@ -25,13 +25,8 @@ Create the following IAM roles and policies using Promethium-provided templates.
 
 ### 🚀 Usage
 
-`python3 tf_install_role_verifier <Need to fill in parameters>`
+`./update-policies.sh account_id=... region=... company_name=... policies_dir=... [eks_oidc_id=...] [eks_cluster_name=...]`
 
-| Parameter | Description | Example |
-| --------- | ----------- | ------- |
-|  |  |  |
-|  |  |  |
-|  |  |  |
 
 | Resource | What uses it | Attached Policies | Trust Policies | Notes |
 |----------|--------------|-------------------|----------------|-------|
