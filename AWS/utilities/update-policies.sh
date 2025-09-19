@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Usage:
-# ./replace_placeholders.sh account_id=... region=... company_name=... policies_dir=... [eks_oidc_id=...] [eks_cluster_name=...]
+# ./update-policies.sh account_id=... region=... company_name=... policies_dir=... [eks_oidc_id=...] [eks_cluster_name=...]
 
 # Initialize variables
 ACCOUNT_ID=""
