@@ -9,8 +9,30 @@ Before deploying Promethium, customers must set up the required IAM roles and po
 ### Prerequisites
 
 1. **AWS CLI configured** with credentials that have permissions to read IAM roles and policies
-2. **Python 3.6+** with boto3 installed: `pip install boto3`
-3. **Required IAM roles created** according to your deployment configuration
+   ```
+      {
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "IAMVerificationScriptPermissions",
+            "Effect": "Allow",
+            "Action": [
+                "sts:GetCallerIdentity",
+                "iam:GetRole",
+                "iam:ListAttachedRolePolicies", 
+                "iam:GetPolicy",
+                "iam:GetPolicyVersion",
+                "iam:ListRolePolicies",
+                "iam:GetRolePolicy",
+                "iam:SimulatePrincipalPolicy"
+            ],
+            "Resource": "*"
+        }
+    ]
+    }
+```
+3. **Python 3.6+** with boto3 installed: `pip install boto3`
+4. **Required IAM roles created** according to your deployment configuration
 
 ### Quick Start
 
