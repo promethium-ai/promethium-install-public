@@ -22,11 +22,6 @@ Promethium Data Plane (Intelligent Edge). The Promethium Data Plane is installed
 
 This repository contains the artifacts your team needs to install the Promethium Intelligent Edge in your cloud environment. It is designed for security, consistency, and minimal operational overhead.
 
-## 🌐 Supported Platforms
-
-- [**▶ AWS (EKS) Installation Guide**](./AWS/README.md)
-- [**▶ Azure (AKS) Installation Guide**](./azure/README.md)
-
 ## 🧱 Installation Overview
 
 The installation process includes:
@@ -47,4 +42,10 @@ The VM that the install automation will run on requires the following tools;
 - [Azure CLI: Version: 2.65.0](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli)
 - Python3 Version: 3.9.9
 
+
+## 🌐 Supported Platforms
+
+- [**▶ AWS (EKS) Installation Guide**](./AWS/README.md)
+- [**▶ Azure (AKS) Installation Guide**](./azure/README.md)
+  
 ---
