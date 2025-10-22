@@ -21,11 +21,13 @@ The following steps will describe how to deploy a secure Promethium Intelligent 
 
 ## 🔐 2. IAM Roles & Policies
 
-Create the following IAM roles and policies using Promethium-provided templates. Ensure all roles and policies are tagged (e.g., `Service=PromethiumIE`). The roles policies in this repo have placeholders for the AWS account ID and AWS region that the IE will be deployed to. Post cloning this repository you can the the utility [update-policies.sh](utilities/update-policies.sh) to add the AWS account ID and the AWS region to the policies that have placeholders.
+Create the following IAM roles and policies using Promethium-provided templates. Ensure all roles and policies are tagged (e.g., `Service=PromethiumIE`). The roles policies in this repo have placeholders for the AWS account ID and AWS region that the IE will be deployed to. Post cloning this repository you can run the utility [update-policies.sh](utilities/update-policies.sh) to add the AWS account ID and the AWS region to the policies that have placeholders.
 
 ### 🚀 Usage
 
-`./update-policies.sh account_id=... region=... company_name=... policies_dir=... [eks_oidc_id=...] [eks_cluster_name=...]`
+```BASH
+./update-policies.sh account_id=... region=... company_name=... policies_dir=... [eks_oidc_id=...] [eks_cluster_name=...]
+```
 
 
 | Resource | What uses it | Attached Policies | Trust Policies | Notes |
