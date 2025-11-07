@@ -12,11 +12,6 @@ This package contains two CloudFormation templates that configure the necessary 
 ### Purpose
 Creates an IAM role and instance profile that Terraform uses to deploy the Promethium EKS infrastructure.
 
-### What It Creates
-- **IAM Role**: `PromethiumDeploymentRole` (customizable)
-- **Instance Profile**: Attached to EC2 instances running Terraform
-- **Managed Policy**: AWS Systems Manager access for remote management
-
 ### Permissions Included
 The deployment role has permissions to create and manage:
 - EKS clusters and node groups
@@ -44,18 +39,6 @@ aws cloudformation create-stack \
 
 ### Purpose
 Creates the IAM roles required by Kubernetes service accounts and EKS cluster operations after installation.
-
-### What It Creates
-Eight IAM roles for different operational components:
-
-1. **EBS CSI Driver Role** - Manages EBS volumes for persistent storage
-2. **EFS CSI Driver Role** - Manages EFS access points for shared storage
-3. **Load Balancer Controller Role** - Creates and manages AWS load balancers
-4. **Cluster Autoscaler Role** - Scales worker nodes based on demand
-5. **EKS Cluster Role** - Core EKS control plane permissions
-6. **EKS Worker Node Role** - Permissions for EC2 worker nodes
-7. **PostgreSQL Backup Service Role** - Backs up databases to S3 and accesses ECR
-8. **Glue Trino Service Role** - Accesses AWS Glue catalog and S3 data
 
 ### Parameters
 All parameters are optional and allow customization:
