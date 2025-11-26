@@ -46,6 +46,6 @@ The VM that the install automation will run on requires the following tools;
 ## 🌐 Supported Platforms
 
 - [**▶ AWS (EKS) Installation Guide**](./AWS/README.md)
-- [**▶ Azure (AKS) Installation Guide**](./azure/README.md)
+- [**▶ Azure (AKS) Installation Guide**](./Azure/README.md)
   
 ---

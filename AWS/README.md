@@ -1,6 +1,6 @@
 # ✅ Promethium Intelligent Edge Installation (AWS)
 
-The following steps will describe how to deploy a secure Promethium Intelligent Edge in AWS. It will deploy an Amazon Elastic Kubernetes Service (EKS) within use the Promethium Application services will be deployed. The deployment will configure the following footprint;
+The following steps will describe how to deploy a secure Promethium Intelligent Edge in AWS. It will deploy an Amazon Elastic Kubernetes Service (EKS) within which the Promethium Application services will be deployed. The deployment will configure the following footprint;
 
 ![Promethium Intelligent Edge (AWS)](../images/AWS_IE.png)
 
