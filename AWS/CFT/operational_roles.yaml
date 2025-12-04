@@ -1,6 +1,33 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: 'EKS Addon Roles and Service Account Roles for Promethium EKS Cluster'
 
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Tagging Options"
+        Parameters:
+          - TagMode
+          - CustomTags
+      - Label:
+          default: "EKS Role Configuration"
+        Parameters:
+          - ClusterName
+          - OIDCProviderUrl
+          - EBSCSIDriverRoleName
+          - EFSCSIDriverRoleName
+          - LoadBalancerControllerRoleName
+          - ClusterAutoscalerRoleName
+          - EKSClusterRoleName
+          - EKSWorkerNodeRoleName
+          - PGBackupServiceRoleName
+          - GlueTrinoServiceRoleName
+    ParameterLabels:
+      TagMode:
+        default: "Tag Mode"
+      CustomTags:
+        default: "Custom Tags (Key=Value,Key2=Value2)"
+
 Parameters:
   ClusterName:
     Type: String
@@ -52,7 +79,30 @@ Parameters:
     Default: ''
     Description: Custom name for Glue Trino Service role (optional)
 
+  TagMode:
+    Type: String
+    Default: default
+    AllowedValues:
+      - default
+      - custom
+    Description: Choose whether to use default tags or user-supplied custom tags.
+
+  CustomTags:
+    Type: String
+    Default: ""
+    Description: "Custom tags in Key=Value,Key2=Value2 format (used only when TagMode=custom)"
+
+Mappings:
+  DefaultTags:
+    Values:
+      Environment: prod
+      Product: Promethium
+      Owner: support@promethium.ai
+      createdBy: CloudFormation
+      Project: Intelligentedge
+
 Conditions:
+  HasCustomTags: !Not [!Equals [!Ref CustomTags, ""]]
   HasCustomEBSRoleName: !Not [!Equals [!Ref EBSCSIDriverRoleName, '']]
   HasCustomEFSRoleName: !Not [!Equals [!Ref EFSCSIDriverRoleName, '']]
   HasCustomLBRoleName: !Not [!Equals [!Ref LoadBalancerControllerRoleName, '']]
@@ -63,6 +113,72 @@ Conditions:
   HasCustomGlueTrinoRoleName: !Not [!Equals [!Ref GlueTrinoServiceRoleName, '']]
 
 Resources:
+
+  TagResolverFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Path: "/"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  TagResolverFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Timeout: 30
+      Role: !GetAtt TagResolverFunctionRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import cfnresponse
+
+          def lambda_handler(event, context):
+              try:
+                  props = event.get("ResourceProperties", {})
+                  tag_mode = props.get("TagMode", "default")
+                  default_tags = props.get("DefaultTags", {})
+                  custom_tags = props.get("CustomTags", "")
+
+                  tags = []
+
+                  if isinstance(default_tags, dict):
+                      for k, v in default_tags.items():
+                          tags.append({"Key": k, "Value": v})
+
+                  if tag_mode == "custom" and isinstance(custom_tags, str) and custom_tags.strip() != "":
+                      pairs = custom_tags.split(",")
+                      for pair in pairs:
+                          if "=" in pair:
+                              k, v = pair.split("=", 1)
+                              tags.append({"Key": k.strip(), "Value": v.strip()})
+
+                  response_data = {"Tags": tags}
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
+
+              except Exception as e:
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {"Error": str(e)})
+
+  TagResolver:
+    Type: Custom::TagResolver
+    Properties:
+      ServiceToken: !GetAtt TagResolverFunction.Arn
+      TagMode: !Ref TagMode
+      DefaultTags:
+        Environment: !FindInMap [DefaultTags, Values, Environment]
+        Product: !FindInMap [DefaultTags, Values, Product]
+        Owner: !FindInMap [DefaultTags, Values, Owner]
+        createdBy: !FindInMap [DefaultTags, Values, createdBy]
+        Project: !FindInMap [DefaultTags, Values, Project]
+      CustomTags: !Ref CustomTags
+
   EBSCSIDriverRole:
     Type: AWS::IAM::Role
     Properties:
@@ -91,10 +207,10 @@ Resources:
               ]
             }
           - OIDCProviderUrl: !Ref OIDCProviderUrl
-
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy
       Path: /
+      Tags: !GetAtt TagResolver.Tags
       Policies:
         - PolicyName: EBSCSIKMSPolicy
           PolicyDocument:
@@ -147,6 +263,7 @@ Resources:
             }
           - OIDCProviderUrl: !Ref OIDCProviderUrl
       Path: /
+      Tags: !GetAtt TagResolver.Tags
       Policies:
         - PolicyName: EFSCSIDriverPolicy
           PolicyDocument:
@@ -205,6 +322,7 @@ Resources:
             }
           - OIDCProviderUrl: !Ref OIDCProviderUrl
       Path: /
+      Tags: !GetAtt TagResolver.Tags
 
   LoadBalancerControllerPolicy:
     Type: AWS::IAM::Policy
@@ -411,6 +529,7 @@ Resources:
             }
           - OIDCProviderUrl: !Ref OIDCProviderUrl
       Path: /
+      Tags: !GetAtt TagResolver.Tags
       Policies:
         - PolicyName: ClusterAutoscalerPolicy
           PolicyDocument:
@@ -471,6 +590,7 @@ Resources:
         - arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
         - arn:aws:iam::aws:policy/AmazonEKSVPCResourceController
       Path: /
+      Tags: !GetAtt TagResolver.Tags
 
   EKSWorkerNodeRole:
     Type: AWS::IAM::Role
@@ -492,6 +612,7 @@ Resources:
         - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
       Path: /
+      Tags: !GetAtt TagResolver.Tags
       Policies:
         - PolicyName: WorkerKMSAccess
           PolicyDocument:
@@ -539,6 +660,7 @@ Resources:
             }
           - OIDCProviderUrl: !Ref OIDCProviderUrl
       Path: /
+      Tags: !GetAtt TagResolver.Tags
       Policies:
         - PolicyName: PGBackupPolicy
           PolicyDocument:
@@ -602,6 +724,7 @@ Resources:
             }
           - OIDCProviderUrl: !Ref OIDCProviderUrl
       Path: /
+      Tags: !GetAtt TagResolver.Tags
       Policies:
         - PolicyName: GlueTrinoPolicy
           PolicyDocument:

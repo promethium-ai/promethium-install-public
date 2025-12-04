@@ -11,12 +11,36 @@ Metadata:
     ParameterLabels:
       PromethiumInstallRole:
         default: "Promethium Terraform IAM Role Name"
+      CustomTags:
+        default: "Optional additional or overriding tags"
 
 Parameters:
   PromethiumInstallRole:
     Type: String
     Default: PromethiumDeploymentRole
     Description: Name of the IAM Role that Terraform will use to deploy Promethium infrastructure
+
+  CustomTags:
+    Type: String
+    Default: "[]"
+    Description: |
+      JSON array of tags. Example:
+      [
+        { "Key": "Environment", "Value": "qa" },
+        { "Key": "Owner", "Value": "someone@example.com" }
+      ]
+
+Mappings:
+  DefaultTags:
+    Values:
+      Environment: prod
+      Product: Promethium
+      Owner: support@promethium.ai
+      createdBy: CloudFormation
+      Project: Intelligentedge
+
+Conditions:
+  AlwaysTrue: !Equals [ "true", "true" ]
 
 Resources:
   TerraformRole:
@@ -33,6 +57,17 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
       Path: /
+      Tags:
+        - Key: Environment
+          Value: !FindInMap [DefaultTags, Values, Environment]
+        - Key: Product
+          Value: !FindInMap [DefaultTags, Values, Product]
+        - Key: Owner
+          Value: !FindInMap [DefaultTags, Values, Owner]
+        - Key: createdBy
+          Value: !FindInMap [DefaultTags, Values, createdBy]
+        - Key: Project
+          Value: !FindInMap [DefaultTags, Values, Project]
       Policies:
         - PolicyName: promethium-terraform-ec2-policy
           PolicyDocument:
