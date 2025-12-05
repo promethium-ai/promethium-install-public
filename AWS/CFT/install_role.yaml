@@ -50,7 +50,6 @@ Mappings:
       Project: "Intelligentedge"
 
 Conditions:
-  UseCustom: !Equals [!Ref TagMode, "custom"]
 
 Resources:
   TagResolverFunctionRole:
