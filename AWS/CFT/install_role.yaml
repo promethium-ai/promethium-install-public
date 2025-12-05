@@ -40,7 +40,6 @@ Mappings:
       Project: Intelligentedge
 
 Conditions:
-  AlwaysTrue: !Equals [ "true", "true" ]
 
 Resources:
   TerraformRole:
