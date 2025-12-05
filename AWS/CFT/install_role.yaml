@@ -157,7 +157,7 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
       Path: /
-      Tags: !GetAtt TagResolver.MergedTags
+      Tags: !GetAtt TagResolver.Tags
 
       Policies:
         - PolicyName: promethium-terraform-ec2-policy
