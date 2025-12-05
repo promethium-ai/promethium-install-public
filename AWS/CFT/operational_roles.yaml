@@ -102,7 +102,6 @@ Mappings:
       Project: Intelligentedge
 
 Conditions:
-  HasCustomTags: !Not [!Equals [!Ref CustomTags, ""]]
   HasCustomEBSRoleName: !Not [!Equals [!Ref EBSCSIDriverRoleName, '']]
   HasCustomEFSRoleName: !Not [!Equals [!Ref EFSCSIDriverRoleName, '']]
   HasCustomLBRoleName: !Not [!Equals [!Ref LoadBalancerControllerRoleName, '']]
