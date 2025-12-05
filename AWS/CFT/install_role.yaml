@@ -5,44 +5,145 @@ Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label:
+          default: "Tagging Options"
+        Parameters:
+          - TagMode
+          - CustomTags
+      - Label:
           default: "Role Configuration"
         Parameters:
           - PromethiumInstallRole
     ParameterLabels:
+      TagMode:
+        default: "Tag Mode (default or custom)"
+      CustomTags:
+        default: "Custom Tags (key=value,key2=value2)"
       PromethiumInstallRole:
         default: "Promethium Terraform IAM Role Name"
-      CustomTags:
-        default: "Optional additional or overriding tags"
 
 Parameters:
   PromethiumInstallRole:
     Type: String
     Default: PromethiumDeploymentRole
-    Description: Name of the IAM Role that Terraform will use to deploy Promethium infrastructure
+    Description: IAM Role used by Terraform to deploy Promethium infrastructure
+
+  TagMode:
+    Type: String
+    Default: default
+    AllowedValues:
+      - default
+      - custom
+    Description: Select whether to apply default tags or custom user-supplied tags.
 
   CustomTags:
     Type: String
-    Default: "[]"
-    Description: |
-      JSON array of tags. Example:
-      [
-        { "Key": "Environment", "Value": "qa" },
-        { "Key": "Owner", "Value": "someone@example.com" }
-      ]
+    Default: ""
+    Description: "Comma-separated key=value pairs. Example: Environment=qa,Owner=me@example.com"
 
 Mappings:
   DefaultTags:
     Values:
-      Environment: prod
-      Product: Promethium
-      Owner: support@promethium.ai
-      createdBy: CloudFormation
-      Project: Intelligentedge
+      Environment: "prod"
+      Product: "Promethium"
+      Owner: "support@promethium.ai"
+      createdBy: "CloudFormation"
+      Project: "Intelligentedge"
 
 Conditions:
-  AlwaysTrue: !Equals [ "true", "true" ]
+  UseCustom: !Equals [!Ref TagMode, "custom"]
 
 Resources:
+  TagResolverFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  TagResolverFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.9
+      Handler: index.handler
+      Role: !GetAtt TagResolverFunctionRole.Arn
+      Timeout: 10
+      Code:
+        ZipFile: |
+          import urllib3
+          import json
+
+          SUCCESS = "SUCCESS"
+          FAILED = "FAILED"
+
+          http = urllib3.PoolManager()
+
+          def send_response(event, context, response_status, response_data):
+              response_url = event['ResponseURL']
+
+              response_body = {
+                  'Status': response_status,
+                  'Reason': f"See CloudWatch Logs for details: {context.log_stream_name}",
+                  'PhysicalResourceId': context.log_stream_name,
+                  'StackId': event['StackId'],
+                  'RequestId': event['RequestId'],
+                  'LogicalResourceId': event['LogicalResourceId'],
+                  'Data': response_data
+              }
+
+              encoded = json.dumps(response_body).encode('utf-8')
+              headers = {'content-type': '', 'content-length': str(len(encoded))}
+              http.request("PUT", response_url, body=encoded, headers=headers)
+
+          def parse_custom_tags(raw):
+              if not raw:
+                  return {}
+              tags = {}
+              for pair in raw.split(","):
+                  if "=" in pair:
+                      key, value = pair.split("=", 1)
+                      tags[key.strip()] = value.strip()
+              return tags
+
+          def handler(event, context):
+              try:
+                  mode = event['ResourceProperties']['TagMode']
+                  default_tags = event['ResourceProperties']['DefaultTags']
+                  custom_raw = event['ResourceProperties']['CustomTags']
+
+                  merged = {str(k): str(v) for k, v in default_tags.items()}
+
+                  if mode == "custom":
+                      custom_map = parse_custom_tags(custom_raw)
+                      merged.update(custom_map)
+
+                  tag_list = [{"Key": k, "Value": v} for k, v in merged.items()]
+
+                  send_response(event, context, SUCCESS, {"MergedTags": tag_list})
+
+              except Exception as e:
+                  send_response(event, context, FAILED, {"Error": str(e)})
+
+  TagResolver:
+    Type: Custom::TagResolver
+    DependsOn: TagResolverFunction
+    Properties:
+      ServiceToken: !GetAtt TagResolverFunction.Arn
+      TagMode: !Ref TagMode
+      DefaultTags:
+        Environment: !FindInMap [DefaultTags, Values, Environment]
+        Product:     !FindInMap [DefaultTags, Values, Product]
+        Owner:       !FindInMap [DefaultTags, Values, Owner]
+        createdBy:   !FindInMap [DefaultTags, Values, createdBy]
+        Project:     !FindInMap [DefaultTags, Values, Project]
+      CustomTags: !Ref CustomTags
+
   TerraformRole:
     Type: AWS::IAM::Role
     Properties:
@@ -57,17 +158,8 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
       Path: /
-      Tags:
-        - Key: Environment
-          Value: !FindInMap [DefaultTags, Values, Environment]
-        - Key: Product
-          Value: !FindInMap [DefaultTags, Values, Product]
-        - Key: Owner
-          Value: !FindInMap [DefaultTags, Values, Owner]
-        - Key: createdBy
-          Value: !FindInMap [DefaultTags, Values, createdBy]
-        - Key: Project
-          Value: !FindInMap [DefaultTags, Values, Project]
+      Tags: !GetAtt TagResolver.MergedTags
+
       Policies:
         - PolicyName: promethium-terraform-ec2-policy
           PolicyDocument:
@@ -128,7 +220,6 @@ Resources:
                 Action:
                   - ssm:GetParameter
                 Resource: !Sub 'arn:aws:ssm:${AWS::Region}::parameter/aws/service/eks/optimized-ami/*/amazon-linux-*/recommended/release_version'
-
         - PolicyName: promethium-terraform-acm-policy
           PolicyDocument:
             Version: '2012-10-17'
