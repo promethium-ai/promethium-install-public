@@ -1,0 +1,124 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Creates an S3 Gateway VPC endpoint and a Glue NETWORK connection
+  for running Promethium Glue crawlers via private VPC networking.
+
+Parameters:
+  # --- VPC / Networking ---
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC hosting the EKS cluster and Glue crawler ENIs
+
+  RouteTableIds:
+    Type: CommaDelimitedList
+    Description: >
+      Route tables associated with the private subnets
+      (must be used by the Glue crawler subnet)
+
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: >
+      Private subnet for the Glue NETWORK connection.
+      Must route to S3 via the Gateway endpoint.
+
+  AvailabilityZone:
+    Type: String
+    Description: Availability zone for the Glue network connection subnet
+
+  SecurityGroupIds:
+    Type: List<AWS::EC2::SecurityGroup::Id>
+    Description: >
+      Security groups allowing outbound HTTPS (443) to S3
+
+  AwsRegion:
+    Type: String
+    Default: us-east-1
+    Description: AWS region
+
+  # --- Endpoint policy (optional) ---
+  AddEndpointPolicy:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+    Description: Whether to scope the S3 endpoint to specific buckets
+
+  AllowedBucketArns:
+    Type: List<String>
+    Default: ''
+    Description: >
+      Optional list of S3 bucket ARNs (e.g. arn:aws:s3:::my-bucket)
+      used when AddEndpointPolicy=true
+
+  # --- Glue connection ---
+  GlueConnectionName:
+    Type: String
+    Default: promethium-glue-connection
+    Description: Name of the Glue NETWORK connection
+
+  GlueConnectionDescription:
+    Type: String
+    Default: Glue network connection for Promethium crawler
+
+Conditions:
+  UseEndpointPolicy: !Equals [!Ref AddEndpointPolicy, 'true']
+
+Resources:
+  # -----------------------------
+  # S3 Gateway VPC Endpoint
+  # -----------------------------
+  S3GatewayEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VpcId
+      VpcEndpointType: Gateway
+      RouteTableIds: !Ref RouteTableIds
+      ServiceName: !Sub com.amazonaws.${AwsRegion}.s3
+      PolicyDocument:
+        Fn::If:
+          - UseEndpointPolicy
+          - Version: '2012-10-17'
+            Statement:
+              - Sid: AllowListBucket
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Ref AllowedBucketArns
+              - Sid: AllowGetObject
+                Effect: Allow
+                Action: s3:GetObject
+                Resource:
+                  Fn::Join:
+                    - ''
+                    - - !Select [0, !Ref AllowedBucketArns]
+                      - '/*'
+          - !Ref AWS::NoValue
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-s3-gateway-endpoint
+
+  # -----------------------------
+  # Glue NETWORK Connection
+  # -----------------------------
+  GlueNetworkConnection:
+    Type: AWS::Glue::Connection
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      ConnectionInput:
+        Name: !Ref GlueConnectionName
+        Description: !Ref GlueConnectionDescription
+        ConnectionType: NETWORK
+        PhysicalConnectionRequirements:
+          SubnetId: !Ref SubnetId
+          AvailabilityZone: !Ref AvailabilityZone
+          SecurityGroupIdList: !Ref SecurityGroupIds
+        MatchCriteria:
+          - !Sub vpc:${VpcId}
+        ConnectionProperties: {}
+
+Outputs:
+  S3GatewayEndpointId:
+    Description: S3 Gateway VPC endpoint ID (use in S3 bucket policies)
+    Value: !Ref S3GatewayEndpoint
+
+  GlueConnectionName:
+    Description: Glue connection name to use in crawlers
+    Value: !Ref GlueConnectionName
