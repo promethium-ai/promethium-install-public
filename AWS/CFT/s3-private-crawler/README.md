@@ -76,8 +76,58 @@ The deletion path prints failure events (if any) and exits non-zero when the del
 
 
 ## Post-deployment
-- Update the S3 bucket policy so the VPC endpoint ID is allowed to access the bucket.
+- Update the S3 bucket policy so the VPC endpoint ID is allowed to access the bucket. 
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "AllowGlueListBucketViaVpcEndpoint",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": <role ARN for Trino OIDC role> eg - "arn:aws:iam::734236616923:role/promethium-qa-s3testing6-trino-oidc-role"
+            },
+            "Action": "s3:ListBucket",
+            "Resource": "arn:aws:s3:::pm61data3",
+            "Condition": {
+                "StringEquals": {
+                    "aws:SourceVpce": <VPC Endpoint id from above command's output eg- "vpce-0f932f36ee0ae56c6"
+                },
+                "StringLike": {
+                    "s3:prefix": [
+                        "<bucket prefix>",
+                        "<bucket prefix>/",
+                        "<bucket prefix>/*"
+                    ]
+                }
+            }
+        },
+        {
+            "Sid": "AllowGlueGetObjectViaVpcEndpoint",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": <role ARN for Trino OIDC role> eg - "arn:aws:iam::734236616923:role/promethium-qa-s3testing6-trino-oidc-role"
+            },
+            "Action": "s3:GetObject",
+            "Resource": "arn:aws:s3:::<bucketname>/<bucket prefix>/*",
+            "Condition": {
+                "StringEquals": {
+                    "aws:SourceVpce": <VPC Endpoint id from above command's output eg- "vpce-0f932f36ee0ae56c6"
+                }
+            }
+        }
+    ]
+}
+```
+
 - Update Promethium's glue-service deployment (and/or Glue crawler definition) with the Glue connection name from the stack.
+```json
+kubectl set env deployment/glue-crawler \
+  GLUE_USE_VPC_CONNECTION=false \
+  GLUE_VPC_CONNECTION_NAME="<connection name from above step>" \
+  -n intelligentedge
+  ```
 
 ## Template location
 See `promethium-vpc-s3-glue-connection.yaml` in this folder for the Terraform template that provisions the endpoint and Glue connection resources.
