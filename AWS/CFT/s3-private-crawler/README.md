@@ -86,7 +86,7 @@ The deletion path prints failure events (if any) and exits non-zero when the del
             "Sid": "AllowGlueListBucketViaVpcEndpoint",
             "Effect": "Allow",
             "Principal": {
-                "AWS": <role ARN for Trino OIDC role> eg - "arn:aws:iam::734236616923:role/promethium-qa-s3testing6-trino-oidc-role"
+                "AWS": <role ARN for Trino OIDC role> eg - "arn:aws:iam::<account_id>:role/promethium-<env>-<tenant_name>-trino-oidc-role"
             },
             "Action": "s3:ListBucket",
             "Resource": "arn:aws:s3:::pm61data3",
@@ -107,7 +107,7 @@ The deletion path prints failure events (if any) and exits non-zero when the del
             "Sid": "AllowGlueGetObjectViaVpcEndpoint",
             "Effect": "Allow",
             "Principal": {
-                "AWS": <role ARN for Trino OIDC role> eg - "arn:aws:iam::734236616923:role/promethium-qa-s3testing6-trino-oidc-role"
+                "AWS": <role ARN for Trino OIDC role> eg - "arn:aws:iam::<account_id>:role/promethium-<env>-<tenant_name>-trino-oidc-role"
             },
             "Action": "s3:GetObject",
             "Resource": "arn:aws:s3:::<bucketname>/<bucket prefix>/*",
