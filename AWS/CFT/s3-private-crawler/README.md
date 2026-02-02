@@ -12,7 +12,7 @@ The IE Trino pod (via IRSA) and Glue crawlers share the same private path:
 Trino (EKS pod via IRSA) → HTTPS (private) → VPC route tables → S3 Gateway VPC Endpoint → Amazon S3
 
 Glue crawlers use the same VPC path but additionally need:
-- A Glue NETWORK connection
+- A Glue network connection
 - A private subnet + security group
 - Permission to create Elastic Network Interfaces (ENIs)
 
