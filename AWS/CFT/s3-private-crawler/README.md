@@ -32,7 +32,7 @@ To establish the private VPC path you provision the following two resources in t
 - **S3 Gateway VPC Endpoint**
   - Attach to the desired route tables.
   - Optionally apply a restrictive endpoint policy (e.g., limit to specific buckets or principals).
-- **Glue NETWORK Connection**
+- **Glue Network Connection**
   - Bind to a private subnet (determines the AZ) and the security group that allows outbound HTTPS.
   - Glue crawlers use this connection to reach S3 privately through the endpoint.
 
