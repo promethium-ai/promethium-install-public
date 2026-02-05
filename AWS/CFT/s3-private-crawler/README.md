@@ -33,7 +33,7 @@ To establish the private VPC path you provision the following two resources in t
   - Attach to the desired route tables.
   - Optionally apply a restrictive endpoint policy (e.g., limit to specific buckets or principals).
 - **Glue Network Connection**
-  - Bind to a private subnet (determines the AZ) and the security group that allows outbound HTTPS.
+  - Bind to a public subnet (determines the AZ) and the security group that allows outbound HTTPS.
   - Glue crawlers use this connection to reach S3 privately through the endpoint.
 
 ### Deployment
@@ -124,7 +124,7 @@ The deletion path prints failure events (if any) and exits non-zero when the del
 - Update Promethium's glue-service deployment (and/or Glue crawler definition) with the Glue connection name from the stack.
 ```json
 kubectl set env deployment/glue-crawler \
-  GLUE_USE_VPC_CONNECTION=false \
+  GLUE_USE_VPC_CONNECTION=true \
   GLUE_VPC_CONNECTION_NAME="<connection name from above step>" \
   -n intelligentedge
   ```
