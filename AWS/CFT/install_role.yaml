@@ -49,8 +49,6 @@ Mappings:
       createdBy: "CloudFormation"
       Project: "Intelligentedge"
 
-Conditions:
-
 Resources:
   TagResolverFunctionRole:
     Type: AWS::IAM::Role
@@ -157,7 +155,7 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
       Path: /
-      Tags: !GetAtt TagResolver.Tags
+      Tags: !GetAtt TagResolver.MergedTags
 
       Policies:
         - PolicyName: promethium-terraform-ec2-policy
