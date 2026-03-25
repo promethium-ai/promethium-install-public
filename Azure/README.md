@@ -162,7 +162,7 @@ az storage container create \
 
 Terraform must be run from a VM inside the customer VNet. The VM requires:
 
-- Ubuntu 22.04 LTS
+- Ubuntu 22.04 LTS (Python 3.10+) or Ubuntu 24.04 LTS (Python 3.12+)
 - Public IP with NSG rule allowing inbound SSH (port 22) from your IP only
 - Unrestricted outbound internet access on port 443 (see Networking Requirements above for specific endpoints)
 - Placed in the `bastion_subnet` (or `application_subnet`)
