@@ -32,15 +32,17 @@ The installation process includes:
 
 The Intelligent Edge install process will provision a private kubernetes cluster. This requires the installation automation to run in a location that will have network access to the to private endpoint of the provisioned cluster. The simplest option is to provision a Linux VM in the VPC / VNET, that will contain the Intelligent Edge. This will allow the install process to complete kubernetes add-ons and application configuration.
 
-The VM that the install automation will run on requires the following tools (always use the latest stable version):
+The VM that the install automation will run on requires the following tools. The platform-specific guides include install commands that pin to these tested versions:
 
-- [Helm](https://helm.sh/docs/intro/install/) (tested: 3.20.1)
-- [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/) (tested: 1.35.3)
-- [Terraform](https://learn.hashicorp.com/tutorials/terraform/install-cli) (tested: 1.14.8)
-- [Git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git)
-- [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) (tested: 2.34.16 — do not use v1 from apt)
-- [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) (tested: 2.84.0)
-- Python 3.10+ (Ubuntu 22.04 ships 3.10.12; Ubuntu 24.04 ships 3.12)
+| Tool | Pinned Version |
+|------|---------------|
+| [Terraform](https://learn.hashicorp.com/tutorials/terraform/install-cli) | 1.14.8 |
+| [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/) | 1.35.3 |
+| [Helm](https://helm.sh/docs/intro/install/) | 3.20.1 |
+| [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) | 2.84.0 |
+| [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) | 2.34.16 (do not use v1 from apt) |
+| [Git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git) | System default |
+| Python | 3.10+ (Ubuntu 22.04 ships 3.10.12; Ubuntu 24.04 ships 3.12) |
 
 See the platform-specific guides below for detailed installation commands.
 

@@ -170,26 +170,35 @@ Terraform must be run from a VM inside the customer VNet. The VM requires:
 
 ### Tool Installation
 
+The versions below have been tested and validated. Update only when a new release has been verified.
+
 ```bash
 sudo apt-get update
 
 # Prerequisites
 sudo apt-get install -y gnupg software-properties-common unzip git
 
-# Terraform
+# Terraform (pinned version)
+TERRAFORM_VERSION="1.14.8"
 wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
 echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
-sudo apt-get update && sudo apt-get install -y terraform
+sudo apt-get update && sudo apt-get install -y terraform=${TERRAFORM_VERSION}-*
 
-# kubectl
-curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+# kubectl (pinned version)
+KUBECTL_VERSION="v1.35.3"
+curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
 sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
 
-# Helm
-curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+# Helm (pinned version)
+HELM_VERSION="v3.20.1"
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash -s -- --version ${HELM_VERSION}
 
-# Azure CLI
-curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+# Azure CLI (pinned version)
+AZ_VERSION="2.84.0"
+sudo mkdir -p /etc/apt/keyrings
+curl -sLS https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | sudo tee /etc/apt/keyrings/microsoft.gpg > /dev/null
+echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/azure-cli/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/azure-cli.list
+sudo apt-get update && sudo apt-get install -y azure-cli=${AZ_VERSION}-1~$(lsb_release -cs)
 
 # AWS CLI v2 (do not use apt — it ships an outdated v1)
 curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
@@ -201,6 +210,8 @@ mkdir -p /tmp/venv
 python3 -m venv /tmp/venv/.venv
 /tmp/venv/.venv/bin/pip install boto3
 ```
+
+> **Note:** AWS CLI v2 does not support version pinning via the zip installer. It always installs the latest v2 release.
 
 ### Verify Tool Versions
 
