@@ -171,8 +171,12 @@ Terraform must be run from a VM inside the customer VNet. The VM requires:
 ### Tool Installation
 
 ```bash
+sudo apt-get update
+
+# Prerequisites
+sudo apt-get install -y gnupg software-properties-common unzip git
+
 # Terraform
-sudo apt-get install -y gnupg software-properties-common
 wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
 echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
 sudo apt-get update && sudo apt-get install -y terraform
@@ -187,17 +191,28 @@ curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 # Azure CLI
 curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
 
-# AWS CLI
+# AWS CLI v2 (do not use apt — it ships an outdated v1)
 curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-unzip awscliv2.zip && sudo ./aws/install
+unzip -o awscliv2.zip && sudo ./aws/install
 
 # Python venv (required by Terraform module scripts)
 sudo apt-get install -y python3-venv python3-pip
 mkdir -p /tmp/venv
 python3 -m venv /tmp/venv/.venv
-source /tmp/venv/.venv/bin/activate
-pip install boto3
-deactivate
+/tmp/venv/.venv/bin/pip install boto3
+```
+
+### Verify Tool Versions
+
+Record the installed versions for compliance documentation:
+
+```bash
+terraform version
+kubectl version --client
+helm version --short
+az version
+aws --version
+python3 --version
 ```
 
 ---
