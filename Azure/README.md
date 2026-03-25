@@ -14,7 +14,7 @@ The following steps describe how to deploy a secure Promethium Intelligent Edge 
 | 3 Subnets | Three dedicated subnets — see subnet requirements below |
 | Outbound Internet Access | The install VM and AKS nodes require outbound HTTPS access — see Networking Requirements below |
 | Company Name | A `<company_name>` variable used throughout the deployment. Agree on this value with your Promethium technical representative before starting |
-| GitHub PAT | A GitHub Personal Access Token with `read:packages` scope to pull private Terraform modules and Helm charts |
+| GitHub PAT | A GitHub Personal Access Token with `read:packages` scope to pull private Terraform modules and Helm charts (provided by Promethium) |
 | AWS Credentials | Access key and secret for the IAM user permitted to assume the Promethium ECR role (provided by Promethium) |
 
 ### Subnet Requirements
