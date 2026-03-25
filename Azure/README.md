@@ -12,7 +12,7 @@ The following steps describe how to deploy a secure Promethium Intelligent Edge 
 | Region | Azure region for deployment (e.g., `eastus`, `centralus`) |
 | VNet | An existing VNet of at least /22, or allow Terraform to create one |
 | 3 Subnets | Three dedicated subnets — see subnet requirements below |
-| Outbound Internet Access | AKS nodes require HTTPS access to the Promethium Control Plane and image registry |
+| Outbound Internet Access | The install VM and AKS nodes require outbound HTTPS access — see Networking Requirements below |
 | Company Name | A `<company_name>` variable used throughout the deployment. Agree on this value with your Promethium technical representative before starting |
 | GitHub PAT | A GitHub Personal Access Token with `read:packages` scope to pull private Terraform modules and Helm charts |
 | AWS Credentials | Access key and secret for the IAM user permitted to assume the Promethium ECR role (provided by Promethium) |
@@ -30,6 +30,62 @@ Three subnets are required, each in your VNet:
 If you are not deploying a Jumpbox (`install_jumpbox = false`), the `bastion_subnet` still needs to exist but will remain unused.
 
 > **Note:** If you allow Terraform to create the VNet (`install_vnet = true`), all three subnets are created automatically.
+
+### Networking Requirements
+
+#### Subnet Rules
+
+The `appgw_subnet` **must** be dedicated exclusively to the Application Gateway. This is a hard Azure platform requirement — no other resources (VMs, NICs, etc.) may be placed in this subnet.
+
+No specific NSG rules are required between the three subnets. Azure's default VNet routing allows intra-VNet communication. However, if your organisation applies custom NSGs to subnets, ensure the following traffic is permitted:
+
+| From | To | Port | Protocol | Purpose |
+|------|----|------|----------|---------|
+| `aks_subnet` | `appgw_subnet` | 65200–65535 | TCP | Application Gateway health probes (Azure requirement) |
+| `appgw_subnet` | `aks_subnet` | 80, 443 | TCP | Application Gateway → AKS ingress |
+| `bastion_subnet` | Internet | 443 | TCP | Install VM outbound access |
+
+#### Install VM — Outbound Access
+
+The install VM must be able to reach the following endpoints over HTTPS (port 443) during deployment. If your network uses an allowlist-based firewall or NSG, add these:
+
+| Endpoint | Purpose |
+|----------|---------|
+| `github.com`, `*.githubusercontent.com` | Clone Terraform wrapper repo, download tools |
+| `ghcr.io` | Pull Helm charts from GitHub Container Registry |
+| `releases.hashicorp.com` | Download Terraform binary |
+| `registry.terraform.io` | Terraform provider and module downloads |
+| `dl.k8s.io` | Download kubectl |
+| `aka.ms`, `packages.microsoft.com` | Azure CLI installation |
+| `awscli.amazonaws.com` | AWS CLI installation |
+| `pypi.org`, `files.pythonhosted.org` | Python boto3 package (pip install) |
+| `management.azure.com` | Azure Resource Manager API |
+| `login.microsoftonline.com` | Azure AD authentication |
+| `sts.amazonaws.com` | AWS STS assume-role |
+
+#### AKS Nodes — Outbound Access
+
+AKS nodes require outbound access for cluster operations and to pull Promethium container images. If you restrict egress at the subnet or firewall level, allow:
+
+| Endpoint | Port | Purpose |
+|----------|------|---------|
+| `*.hcp.<region>.azmk8s.io` | 443 | AKS API server communication |
+| `mcr.microsoft.com`, `*.data.mcr.microsoft.com` | 443 | Microsoft container images (CoreDNS, metrics-server, etc.) |
+| `management.azure.com` | 443 | Azure API for Kubernetes operations |
+| `login.microsoftonline.com` | 443 | Azure AD token refresh |
+| `*.blob.core.windows.net` | 443 | AKS node image downloads, Azure Storage |
+| `*.table.core.windows.net` | 443 | Azure Table Storage (AKS telemetry) |
+| `*.vault.azure.net` | 443 | Azure Key Vault access |
+| `ghcr.io` | 443 | Promethium Helm charts |
+| `*.dkr.ecr.*.amazonaws.com` | 443 | Promethium container images (AWS ECR) |
+| `api.ecr.*.amazonaws.com` | 443 | ECR authentication API |
+| `sts.amazonaws.com` | 443 | AWS STS for ECR token refresh |
+
+> **Note:** For a complete list of AKS-required endpoints, see [Microsoft's documentation on AKS outbound network rules](https://learn.microsoft.com/en-us/azure/aks/outbound-rules-control-egress).
+
+#### DNS
+
+If your VNet uses custom DNS servers (instead of Azure-provided DNS at 168.63.129.16), ensure they can resolve all endpoints listed above. Misconfigured DNS is a common cause of silent failures during `terraform init` and Helm chart pulls.
 
 ---
 
@@ -64,6 +120,19 @@ az role assignment create \
 
 > **Note:** This step is blocked if the Owner role has ABAC conditions attached. In that case, ask another Owner without ABAC restrictions to run the command.
 
+> **Tip:** If you plan to deploy to multiple resource groups (e.g., dev, staging, prod), scope both role assignments at the **subscription level** instead of the resource group level. This avoids having to re-grant roles each time a new resource group is created:
+> ```bash
+> az role assignment create \
+>   --assignee <sp_client_id> \
+>   --role "Contributor" \
+>   --scope /subscriptions/<subscription_id>
+>
+> az role assignment create \
+>   --assignee <sp_client_id> \
+>   --role "User Access Administrator" \
+>   --scope /subscriptions/<subscription_id>
+> ```
+
 ---
 
 ## 3. Terraform State Backend
@@ -94,8 +163,10 @@ az storage container create \
 Terraform must be run from a VM inside the customer VNet. The VM requires:
 
 - Ubuntu 22.04 LTS
-- Public IP with NSG rule allowing SSH from your IP only
-- The following tools installed: `terraform`, `kubectl`, `helm`, `az`, `aws`, `git`
+- Public IP with NSG rule allowing inbound SSH (port 22) from your IP only
+- Unrestricted outbound internet access on port 443 (see Networking Requirements above for specific endpoints)
+- Placed in the `bastion_subnet` (or `application_subnet`)
+- The following tools installed: `terraform`, `kubectl`, `helm`, `az`, `aws`, `git`, `python3-venv`
 
 ### Tool Installation
 
