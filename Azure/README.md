@@ -228,7 +228,89 @@ python3 --version
 
 ---
 
-## 5. Configuration
+## 5. Customer Information Required
+
+Before starting the deployment, provide the following to your Promethium technical representative.
+
+### Azure Environment
+
+| # | Item |
+|---|------|
+| 1 | Azure Subscription ID |
+| 2 | Azure Tenant ID |
+| 3 | Azure Region (e.g., `eastus`) |
+| 4 | Resource Group name |
+
+### VNet and Subnets
+
+| # | Item |
+|---|------|
+| 5 | VNet name |
+| 6 | VNet resource group (if different from #4) |
+| 7a | AKS subnet name (min /24) |
+| 7b | App Gateway subnet name (min /27, dedicated) |
+| 7c | Bastion / application subnet name (min /27) |
+| 8a | AKS subnet address range (e.g., `10.14.0.0/24`) |
+| 8b | App Gateway subnet address range (e.g., `10.14.1.0/27`) |
+| 8c | Bastion subnet address range (e.g., `10.14.2.0/27`) |
+
+### Networking
+
+| # | Item |
+|---|------|
+| 9 | Free static IP within the App Gateway subnet (e.g., `10.14.1.10`) |
+| 10 | VNet address space (e.g., `10.14.0.0/22`) |
+
+### Terraform State Backend
+
+| # | Item |
+|---|------|
+| 11 | Storage account name |
+| 12 | Storage account resource group |
+| 13 | Container name (recommended: `terraform-backend`) |
+
+### Service Principal
+
+Create the SP and set credentials as environment variables on your install VM. The secret does not need to be shared with Promethium.
+
+```bash
+# Create the SP (save the output — the secret is only shown once)
+az ad sp create-for-rbac \
+  --name "<company_name>-promethium-sp" \
+  --role Contributor \
+  --scopes /subscriptions/<subscription_id>/resourceGroups/<rg_name>
+
+# Grant User Access Administrator (must be run by an Owner without ABAC conditions)
+az role assignment create \
+  --assignee <appId_from_above> \
+  --role "User Access Administrator" \
+  --scope /subscriptions/<subscription_id>/resourceGroups/<rg_name>
+```
+
+Then on your install VM:
+
+```bash
+export ARM_CLIENT_ID="<appId>"
+export ARM_CLIENT_SECRET="<password>"
+export ARM_SUBSCRIPTION_ID="<subscription_id>"
+export ARM_TENANT_ID="<tenant_id>"
+```
+
+### Provided by Promethium
+
+The following values will be supplied by Promethium — no action needed from you:
+
+| Item | Description |
+|------|-------------|
+| `promethium_image_tag` | Application version to deploy |
+| `company_name` | Agreed upon jointly with your Promethium representative |
+| AWS Credentials | Access key and secret for ECR image access |
+| GitHub PAT | Personal Access Token for private Terraform modules |
+| GHCR Token | Token for pulling Helm charts |
+
+---
+
+## 6. Configuration
 
 ### Clone the wrapper repository
 
@@ -312,7 +394,7 @@ aks_service_dns_ip = "10.x.4.10"
 
 ---
 
-## 6. Deployment
+## 7. Deployment
 
 ### Set environment variables
 
@@ -371,7 +453,7 @@ terraform apply -var="ghcr_token=$GHCR_TOKEN"
 
 ---
 
-## 7. Verification
+## 8. Verification
 
 ```bash
 # Get AKS credentials
@@ -389,7 +471,7 @@ kubectl get ingress -n intelligentedge
 
 ---
 
-## 8. Teardown
+## 9. Teardown
 
 ```bash
 # Destroy Postgres first
