@@ -1,10 +1,7 @@
 # Promethium Intelligent Edge Installation (Azure)
 
-<<<<<<< Updated upstream
-=======
 ![Promethium Intelligent Edge (Azure)](../images/Azure_IE.png)
 
->>>>>>> Stashed changes
 The following steps describe how to deploy a secure Promethium Intelligent Edge on Azure. It will deploy an Azure Kubernetes Service (AKS) cluster within which the Promethium application services are deployed, fronted by an Azure Application Gateway.
 
 ---
