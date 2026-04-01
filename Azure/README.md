@@ -1,5 +1,7 @@
 # Promethium Intelligent Edge Installation (Azure)
 
+![Promethium Intelligent Edge (Azure)](../images/Azure_IE.png)
+
 The following steps describe how to deploy a secure Promethium Intelligent Edge on Azure. It will deploy an Azure Kubernetes Service (AKS) cluster within which the Promethium application services are deployed, fronted by an Azure Application Gateway.
 
 ---
@@ -468,6 +470,8 @@ kubectl get pods -n intelligentedge
 # Check ingress
 kubectl get ingress -n intelligentedge
 ```
+
+> **Important:** Post-deployment, the Promethium associate must reset the default support user password and update dependent services. See [post-install credentials runbook](https://pm61data.atlassian.net/wiki/x/AgBfmw).
 
 ---
 
