@@ -471,6 +471,8 @@ kubectl get pods -n intelligentedge
 kubectl get ingress -n intelligentedge
 ```
 
+> **Important:** Post-deployment, the Promethium associate must reset the default support user password and update dependent services. See [post-install credentials runbook](https://pm61data.atlassian.net/wiki/x/AgBfmw).
+
 ---
 
 ## 9. Teardown
