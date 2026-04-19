@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Terraform Instance Profile Role for Promethium EKS Deployment'
+Description: 'Terraform Instance Profile Role for Promethium EKS Deployment (BYO IAM Mode)'
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -9,11 +9,20 @@ Metadata:
         Parameters:
           - PromethiumInstallRole
           - Environment
+      - Label:
+          default: "Customer-Provided EKS Role ARNs"
+        Parameters:
+          - EksClusterRoleArn
+          - EksWorkerRoleArn
     ParameterLabels:
       PromethiumInstallRole:
         default: "Promethium Terraform IAM Role Name"
       Environment:
         default: "Environment (dev/qa/preview/prod)"
+      EksClusterRoleArn:
+        default: "EKS Cluster Role ARN"
+      EksWorkerRoleArn:
+        default: "EKS Worker Node Role ARN"
 
 Parameters:
   PromethiumInstallRole:
@@ -30,6 +39,14 @@ Parameters:
       - preview
       - prod
     Description: Deployment environment
+
+  EksClusterRoleArn:
+    Type: String
+    Description: ARN of the pre-existing IAM role for the EKS cluster control plane (e.g. arn:aws:iam::123456789012:role/my-eks-cluster-role)
+
+  EksWorkerRoleArn:
+    Type: String
+    Description: ARN of the pre-existing IAM role for the EKS worker nodes (e.g. arn:aws:iam::123456789012:role/my-eks-worker-role)
 
 Resources:
 
@@ -325,52 +342,6 @@ Resources:
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Sid: VPCSubnetActions
-            Effect: Allow
-            Action:
-              - ec2:CreateVpc
-              - ec2:DeleteVpc
-              - ec2:ModifyVpcAttribute
-              - ec2:CreateSubnet
-              - ec2:DeleteSubnet
-              - ec2:ModifySubnetAttribute
-            Resource: "*"
-          - Sid: GatewayActions
-            Effect: Allow
-            Action:
-              - ec2:CreateInternetGateway
-              - ec2:DeleteInternetGateway
-              - ec2:AttachInternetGateway
-              - ec2:DetachInternetGateway
-              - ec2:CreateNatGateway
-              - ec2:DeleteNatGateway
-              - ec2:AllocateAddress
-              - ec2:ReleaseAddress
-              - ec2:AssociateAddress
-              - ec2:DisassociateAddress
-            Resource: "*"
-          - Sid: RouteActions
-            Effect: Allow
-            Action:
-              - ec2:CreateRouteTable
-              - ec2:DeleteRouteTable
-              - ec2:CreateRoute
-              - ec2:DeleteRoute
-              - ec2:AssociateRouteTable
-              - ec2:DisassociateRouteTable
-            Resource: "*"
-          - Sid: SecurityGroupActions
-            Effect: Allow
-            Action:
-              - ec2:CreateSecurityGroup
-              - ec2:DeleteSecurityGroup
-              - ec2:AuthorizeSecurityGroupIngress
-              - ec2:RevokeSecurityGroupIngress
-              - ec2:AuthorizeSecurityGroupEgress
-              - ec2:RevokeSecurityGroupEgress
-            Resource:
-              - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*'
-              - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:vpc/*'
           - Sid: VPCDescribeResources
             Effect: Allow
             Action:
@@ -426,10 +397,11 @@ Resources:
               - iam:ListAttachedRolePolicies
               - iam:ListRolePolicies
             Resource:
+              - !Ref EksClusterRoleArn
+              - !Ref EksWorkerRoleArn
+              - !Sub 'arn:aws:iam::${AWS::AccountId}:role/aws-service-role/*'
               - !Sub 'arn:aws:iam::${AWS::AccountId}:role/*promethium*'
               - !Sub 'arn:aws:iam::${AWS::AccountId}:role/*datafabric*'
-              - !Sub 'arn:aws:iam::${AWS::AccountId}:role/aws-service-role/*'
-              - !Sub 'arn:aws:iam::${AWS::AccountId}:role/*eks*'
           - Sid: ServiceLinkedRoles
             Effect: Allow
             Action:
@@ -443,7 +415,7 @@ Resources:
                   - eks-nodegroup.amazonaws.com
                   - eks-addons.amazonaws.com
                   - glue.amazonaws.com
-          - Sid: IAMRoleManagement
+          - Sid: OIDCRoleManagement
             Effect: Allow
             Action:
               - iam:CreateRole
@@ -452,19 +424,12 @@ Resources:
               - iam:DetachRolePolicy
               - iam:PutRolePolicy
               - iam:DeleteRolePolicy
-              - iam:CreateInstanceProfile
-              - iam:DeleteInstanceProfile
-              - iam:AddRoleToInstanceProfile
-              - iam:RemoveRoleFromInstanceProfile
               - iam:TagRole
               - iam:UntagRole
-              - iam:TagInstanceProfile
               - iam:ListInstanceProfilesForRole
             Resource:
               - !Sub 'arn:aws:iam::${AWS::AccountId}:role/*promethium*'
               - !Sub 'arn:aws:iam::${AWS::AccountId}:role/*datafabric*'
-              - !Sub 'arn:aws:iam::${AWS::AccountId}:instance-profile/*promethium*'
-              - !Sub 'arn:aws:iam::${AWS::AccountId}:instance-profile/*datafabric*'
           - Sid: IAMPolicyManagement
             Effect: Allow
             Action:
