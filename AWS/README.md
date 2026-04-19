@@ -1,82 +1,221 @@
-# ✅ Promethium Intelligent Edge Installation (AWS)
-
-The following steps will describe how to deploy a secure Promethium Intelligent Edge in AWS. It will deploy an Amazon Elastic Kubernetes Service (EKS) within which the Promethium Application services will be deployed. The deployment will configure the following footprint;
+# Promethium Intelligent Edge Installation (AWS)
 
 ![Promethium Intelligent Edge (AWS)](../images/AWS_IE.png)
 
-## 📋 1. Environment Prerequisites
-
-| Item                    | Description                                                                 |
-|-------------------------|-----------------------------------------------------------------------------|
-| AWS Account             | Identify the AWS account where the data plane will be deployed              |
-| Region                  | AWS region for deployment (e.g., `us-east-1`)                       |
-| VPC                     | VPC ID that is at least /22 that will contain the Promethium Intelligent Edge |
-| 3+ Private subnets      | Subnets (/24) that will support the kubernetes cluster |
-| Outbound Internet Access| Ensure EKS nodes have HTTPS access to Promethium Control Plane + image registry |
-| DNS & Ingress           | Allow cloud-native ingress (ALB) creation and domain assignment         |
-| S3 Bucket               | Storage location for state persistence and materialized Datamaps |
-| Company Name            | This is a variable <company_name> that is used in a number of the scripts in this guide. Please liaise with your Promethium technical representative to agree on the value for this variable. |
+The following steps describe how to deploy a secure Promethium Intelligent Edge on AWS. It will deploy an Amazon Elastic Kubernetes Service (EKS) cluster within which the Promethium application services are deployed, fronted by an AWS Application Load Balancer (ALB).
 
 ---
 
-## 🔐 2. IAM Roles & Policies
+## 1. Deployment Modes
 
-Create the following IAM roles and policies using Promethium-provided templates. Ensure all roles and policies are tagged (e.g., `Service=PromethiumIE`). The roles policies in this repo have placeholders for the AWS account ID and AWS region that the IE will be deployed to. Post cloning this repository you can run the utility [update-policies.sh](utilities/update-policies.sh) to add the AWS account ID and the AWS region to the policies that have placeholders.
+Promethium supports two deployment modes depending on how much of the AWS infrastructure your organisation manages directly.
 
-### 🚀 Usage
+| Mode | VPC | IAM Roles | Who runs it |
+|------|-----|-----------|-------------|
+| **Mode 1 — VPC Only** | Customer-provided | Promethium Terraform creates all roles | Promethium associate |
+| **Mode 2 — VPC + Base IAM** | Customer-provided | Customer creates EKS cluster & worker roles; Promethium Terraform creates OIDC/IRSA roles | Promethium associate |
 
-```BASH
-./update-policies.sh account_id=... region=... company_name=... policies_dir=... [eks_oidc_id=...] [eks_cluster_name=...]
+> Your Promethium technical representative will confirm which mode applies to your environment before the installation begins.
+
+For detailed step-by-step installation instructions, your Promethium associate will follow:
+- [Mode 1 — VPC Only](README-vpc-only.md)
+- [Mode 2 — VPC + Base IAM](README-mode2-vpc-base-iam.md)
+
+---
+
+## 2. Environment Prerequisites
+
+| Item | Description |
+|------|-------------|
+| AWS Account | The AWS account where the Promethium Intelligent Edge will be deployed |
+| Region | AWS region for deployment (e.g., `us-east-1`) |
+| VPC | An existing VPC of at least `/22` CIDR, or allow Promethium to create one using the [network CloudFormation template](CFT/network.yaml) |
+| Private Subnets | 2 private subnets (minimum `/24`) across 2 availability zones — for EKS worker nodes |
+| Public Subnets | 2 public subnets across 2 availability zones — for the Application Load Balancer |
+| Outbound Internet Access | The install VM and EKS nodes require outbound HTTPS access — see Networking Requirements below |
+| Company Name | A `<company_name>` variable used throughout the deployment. Agree on this value with your Promethium technical representative before starting — max 15 characters, lowercase, no spaces |
+| GitHub PAT | A GitHub Personal Access Token with `read:packages` scope to pull private Terraform modules and Helm charts (provided by Promethium) |
+| Promethium Image Tag | Application release version (e.g., `24.2.2`) — provided by Promethium |
+
+### Subnet Requirements
+
+| Subnet | Count | Availability Zones | Routing | Purpose |
+|--------|-------|--------------------|---------|---------|
+| Private | 2 | 2 different AZs | NAT Gateway | EKS worker nodes |
+| Public | 2 | 2 different AZs | Internet Gateway | Application Load Balancer |
+
+> **Note:** AWS Application Load Balancer requires subnets in at least 2 availability zones. A single public subnet will cause ALB provisioning to fail.
+
+> **Note:** EKS worker nodes must be in private subnets only. Public subnets auto-assign public IPs to instances, which causes EKS node group creation to fail.
+
+If you do not have an existing VPC, Promethium provides a [network CloudFormation template](CFT/network.yaml) that creates all required networking resources automatically.
+
+### Networking Requirements
+
+#### Install VM — Outbound Access
+
+The install VM must reach the following endpoints over HTTPS (port 443) during deployment:
+
+| Endpoint | Purpose |
+|----------|---------|
+| `github.com`, `*.githubusercontent.com` | Clone Terraform wrapper repo, download tools |
+| `ghcr.io` | Pull Helm charts from GitHub Container Registry |
+| `releases.hashicorp.com` | Download Terraform binary |
+| `registry.terraform.io` | Terraform provider and module downloads |
+| `dl.k8s.io` | Download kubectl |
+| `*.amazonaws.com` | AWS API endpoints (EKS, EC2, IAM, S3, ACM, Route 53) |
+| `sts.amazonaws.com` | AWS STS assume-role |
+| `pypi.org`, `files.pythonhosted.org` | Python boto3 package |
+
+#### EKS Nodes — Outbound Access
+
+EKS nodes require outbound access for cluster operations and to pull Promethium container images:
+
+| Endpoint | Port | Purpose |
+|----------|------|---------|
+| `*.eks.amazonaws.com` | 443 | EKS API server communication |
+| `*.ecr.us-east-1.amazonaws.com` | 443 | Promethium container images (AWS ECR) |
+| `api.ecr.*.amazonaws.com` | 443 | ECR authentication API |
+| `sts.amazonaws.com` | 443 | AWS STS for ECR token refresh |
+| `ghcr.io` | 443 | Promethium Helm charts |
+| `s3.amazonaws.com`, `*.s3.amazonaws.com` | 443 | S3 access for EKS and application data |
+
+#### DNS
+
+If your VPC uses custom DNS servers, ensure they can resolve all AWS service endpoints and `ghcr.io`. Misconfigured DNS is a common cause of failures during `terraform init` and Helm chart pulls.
+
+---
+
+## 3. IAM Roles — CloudFormation Templates
+
+Promethium provides CloudFormation templates for creating all required IAM roles. The correct template depends on your deployment mode.
+
+### Mode 1 — VPC Only
+
+Use [`CFT/install_role.yaml`](CFT/install_role.yaml). This creates:
+
+- **`PromethiumDeploymentRole-<company_name>`** — the Terraform deployment role attached to the install VM. Promethium Terraform uses this role to create all infrastructure including EKS cluster and worker IAM roles.
+- **`PromethiumDeploymentRole-<company_name>InstanceProfile`** — EC2 instance profile for attaching the role to the install VM.
+
+### Mode 2 — VPC + Base IAM
+
+Use [`CFT/install_role_byoiam.yaml`](CFT/install_role_byoiam.yaml). This creates:
+
+- **`PromethiumDeploymentRole-<company_name>`** — the Terraform deployment role, scoped to your pre-existing EKS cluster and worker role ARNs (passed as parameters).
+- **`PromethiumDeploymentRole-<company_name>InstanceProfile`** — EC2 instance profile for attaching the role to the install VM.
+
+In Mode 2 your organisation also creates the base EKS roles independently before the Promethium install. Promethium's Terraform will create all OIDC/IRSA service roles automatically once the cluster is up.
+
+### Operational Roles
+
+For post-install operational access (e.g., read-only access for support), see [`CFT/operational_roles.yaml`](CFT/operational_roles.yaml).
+
+---
+
+## 4. Install VM
+
+Terraform must be run from a VM inside the customer VPC. The VM requires:
+
+- Amazon Linux 2023 or Ubuntu 22.04/24.04
+- Outbound internet access on port 443 (see Networking Requirements above)
+- Placed in a private subnet with access to the EKS cluster API endpoint
+- The Promethium install role attached as an EC2 instance profile (see Section 3)
+- The following tools installed: `terraform`, `kubectl`, `helm`, `aws`, `git`, `python3`
+
+Your Promethium associate will handle tool installation as part of the deployment process. A tool installation script is available at [`utilities/install_tools.sh`](utilities/install_tools.sh).
+
+---
+
+## 5. Customer Information Required
+
+Before starting the deployment, provide the following to your Promethium technical representative.
+
+### AWS Environment
+
+| # | Item |
+|---|------|
+| 1 | AWS Account ID |
+| 2 | AWS Region (e.g., `us-east-1`) |
+| 3 | Agreed `company_name` (max 15 chars, lowercase, no spaces) |
+
+### VPC and Subnets
+
+| # | Item |
+|---|------|
+| 4 | VPC ID (or confirm you want Promethium to create it) |
+| 5 | VPC CIDR block (e.g., `10.0.0.0/22`) |
+| 6a | Private subnet IDs × 2 (for EKS nodes, must be in different AZs) |
+| 6b | Public subnet IDs × 2 (for ALB, must be in different AZs) |
+
+### Mode 2 Only — Pre-existing IAM Role ARNs
+
+If deploying in Mode 2, also provide:
+
+| # | Item |
+|---|------|
+| 7 | EKS cluster role ARN |
+| 8 | EKS worker node role ARN |
+
+### Provided by Promethium
+
+The following will be supplied by Promethium — no action needed from you:
+
+| Item | Description |
+|------|-------------|
+| `promethium_image_tag` | Application version to deploy |
+| `company_name` | Agreed upon jointly with your Promethium representative |
+| GitHub PAT | Personal Access Token for private Terraform modules |
+| GHCR Token | Token for pulling Helm charts |
+
+---
+
+## 6. Verification
+
+After deployment your Promethium associate will confirm the following:
+
+```bash
+# Update kubeconfig
+aws eks update-kubeconfig \
+  --name promethium-datafabric-<env>-<company_name>-eks-cluster \
+  --region <aws_region>
+
+# Check all pods are running
+kubectl get pods -n intelligentedge
+kubectl get pods -n cluster-management
+
+# Check the ALB ingress hostname
+kubectl get ingress -n intelligentedge
 ```
 
+All pods should be `Running` or `Completed`. The `ADDRESS` field on the ingress is the ALB DNS name used for your Promethium subdomains.
 
-| Resource | What uses it | Attached Policies | Trust Policies | Notes |
-|----------|--------------|-------------------|----------------|-------|
-| `PromethiumInstall`   | Install VM | <ul><li> [promethium-terraform-acm-policy.json](iam_policy_templates/promethium-terraform-acm-policy.json) </li> <li>[promethium-terraform-ec2-policy.json](iam_policy_templates/promethium-terraform-ec2-policy.json)</li> <li>[promethium-terraform-efs-policy.json](iam_policy_templates/promethium-terraform-efs-policy.json) </li> <li> [promethium-terraform-eks-policy.json](iam_policy_templates/promethium-terraform-eks-policy.json)</li> <li>[promethium-terraform-elb-policy.json](iam_policy_templates/promethium-terraform-elb-policy.json)</li> <li>[promethium-terraform-glue-policy.json](iam_policy_templates/promethium-terraform-glue-policy.json)</li> <li> [promethium-terraform-s3-policy.json](iam_policy_templates/promethium-terraform-s3-policy.json) </li> <li> [AmazonSSMManagedInstanceCore](https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AmazonSSMManagedInstanceCore.html)</li> <li> [promethium-terraform-s3-policy.json](iam_policy_templates/promethium-terraform-s3-policy.json) </li> <li> [promethium-eks-kms-access-policy.json](https://github.com/promethium-ai/promethium-install-public/blob/main/AWS/iam_policy_templates/promethium-eks-kms-access-policy.json)</li> <li> [promethium-terraform-ec2-network-policy.json](https://github.com/promethium-ai/promethium-install-public/blob/main/AWS/iam_policy_templates/promethium-terraform-ec2-network-policy.json)</li> </ul> | [promethium-terraform-install-role-trust-policy.json](iam_policy_templates/promethium-terraform-install-role-trust-policy.json) | This role needs to be created as an **Instance Profile Role**. It will be attached to the install VM required to install Promethium Intelligent Edge (IE)|
-| `promethium-efscsi-role` | Promethium Intelligent Edge (IE) | <ul> [promethium-efscsi-policy.json](iam_policy_templates/promethium-efscsi-policy.json) </ul> | [promethium-efscsi-role-trust-policy.json](iam_policy_templates/promethium-efscsi-role-trust-policy.json) | Allows EFS CSI driver in the EKS cluster to provision and manage EFS file systems and access points|
-| `promethium-eks-autoscaler-role` | Promethium Intelligent Edge (IE) |  <ul> [promethium-eks-autoscaler-policy.json](iam_policy_templates/promethium-eks-autoscaler-policy.json) </ul>| [promethium-eks-autoscaler-role-trust-policy.json](iam_policy_templates/promethium-eks-autoscaler-role-trust-policy.json) | Allows EKS Autoscaler to add or remove worker nodes in Auto Scaling Groups and inspect EC2 and EKS resources to make scaling decisions |
-| `promethium-lbcontroller-role` | Promethium Intelligent Edge (IE) | <ul> [promethium-lbcontroller-policy.json](iam_policy_templates/promethium-lbcontroller-policy.json) </ul> | [promethium-lbcontroller-role-trust-policy.json](iam_policy_templates/promethium-lbcontroller-role-trust-policy.json) | Allows the Load Balancer Controller running the EKS cluster to provision and manage ALBs/NLBs and related networking/security resources on behalf of Kubernetes LoadBalancer ingresses and services |
-| `promethium-s3-access-role` | Promethium Intelligent Edge (IE) | <ul> [promethium-s3-access-policy.json](iam_policy_templates/promethium-s3-access-policy.json) </ul>| [promethium-s3-access-role-trust-policy.json](iam_policy_templates/promethium-s3-access-role-trust-policy.json) | Allows for postgres backups into S3 and pull container images from ECR |
-| `promethium-eks-cluster-role` | Promethium Intelligent Edge (IE) | <ul><li> [AmazonEKSClusterPolicy](https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AmazonEKSClusterPolicy.html) </li> <li>  [AmazonEKSVPCResourceController](https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AmazonEKSVPCResourceController.html) </li> </ul>| [promethium-eks-cluster-role-trust-policy.json](iam_policy_templates/promethium-eks-cluster-role-trust-policy.json) | Gives the EKS control plane permissions to run the cluster, manage AWS infrastructure, and  manage pod-level networking |
-| `promethium-trino-oidc-role` | Promethium Intelligent Edge (IE) | <ul> [promethium-trino-glue-policy.json](iam_policy_templates/promethium-trino-glue-policy.json) </ul> | [promethium-trino-oidc-role-trust-policy.json](iam_policy_templates/promethium-trino-oidc-role-trust-policy.json)| Query and manage data in Glue Data Catalog and S3. Handle KMS encrypted data and launch and interact with Glue jobs using default service role |
-| `promethium-eks-worker-role` | Promethium Intelligent Edge (IE) | <ul><li> [promethium-efscsi-policy.json](iam_policy_templates/promethium-efscsi-policy.json)</li> <li>[promethium-eks-kms-access-policy.json](iam_policy_templates/promethium-eks-kms-access-policy.json) </li> <li> [AmazonEC2ContainerRegistryReadOnly](https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AmazonEC2ContainerRegistryReadOnly.html)</li> <li> [AmazonEKS_CNI_Policy](https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AmazonEKS_CNI_Policy.html)</li><li> [AmazonEKSWorkerNodePolicy](https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AmazonEKSWorkerNodePolicy.html)</li><li> [AmazonSSMManagedInstanceCore](https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AmazonSSMManagedInstanceCore.html)</li></ul>| [promethium-eks-worker-role-trust-policy.json](iam_policy_templates/promethium-eks-worker-role-trust-policy.json) | EKS worker node IAM role to mount and manage EFS volumes (via CSI driver). Uses KMS keys for encrypted EFS volumes. Allows image pulls, network management within EKS|
-| `promethium-ebscsi-role` | Promethium Intelligent Edge (IE) | <ul><li>[promethium-eks-kms-access-policy.json](iam_policy_templates/promethium-eks-kms-access-policy.json)</li><li> [AmazonEBSCSIDriverPolicy](https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AmazonEBSCSIDriverPolicy.html)</li></ul>| [promethium-ebscsi-role-trust-policy.json](iam_policy_templates/promethium-ebscsi-role-trust-policy.json)| Allows the EKS EBS CSI driver to provision, attach, delete, and snapshot encrypted EBS volumes in your cluster using your KMS keys. |
-
-You can use [the following CloudFormation templates](https://github.com/promethium-ai/promethium-install-public/tree/main/AWS/CFT) to create install and operational roles.
-
-For customers needing private S3 access for Trino and Glue crawlers, see the new `AWS/CFT/s3-private-crawler` folder, which includes the deployment guidance and CloudFormation template for the gateway endpoint and Glue NETWORK connection.
+> **Important:** Post-deployment, the Promethium associate must reset the default support user password and update dependent services. See the [post-install credentials runbook](https://pm61data.atlassian.net/wiki/x/AgBfmw).
 
 ---
 
-## 🧪 4. Subnet Tagging
+## 7. Teardown
 
-The subnets that will support the EKS cluster need to have a series of tags. The tags are 
+```bash
+# Destroy Postgres first to avoid dependency issues
+terraform destroy \
+  -target=module.promethium.module.postgres \
+  -var="ghcr_token=$GHCR_TOKEN"
 
-| Key | Value |
-| --- | ----- |
-| kubernetes.io/cluster/${CLUSTER_NAME} | owned |
-| kubernetes.io/role/internal-elb | 1 |
-
-The utility [tag_subnets.sh](utilities/tag_subnets.sh) will apply these tags.
-
-### 🚀 Usage
-
-`./tag-subnets.sh <vpc_id> <region> <company_name> [cluster_name]`
-
-| Parameter | Description | Example |
-| --------- | ----------- | ------- |
-| vpc_id | The ID of the VPC | vpc-0abc123de456fghij |
-| region | The AWS region the VPC is located in | us-east-1 |
-| company_name | The variable <company_name> that is used through this install process | acme |
+# Destroy everything else
+terraform destroy -var="ghcr_token=$GHCR_TOKEN"
+```
 
 ---
 
-## 🧪 5. Role and Policy Validation
+## 8. Additional Resources
 
-The following utilities can be used to verify that the roles created have the requisite permissions to execute the installation process.
-
-| Utility | Purpose |
-|------------------------------------------------|---------------|
-| [verify_iam_setup.py](utilities/checker/README.md) | Verifies permissions associated with PromethiumInstall role |
-
----
+| Resource | Description |
+|----------|-------------|
+| [Mode 1 Install Guide](README-vpc-only.md) | Step-by-step guide for Promethium associates (VPC Only mode) |
+| [Mode 2 Install Guide](README-mode2-vpc-base-iam.md) | Step-by-step guide for Promethium associates (VPC + Base IAM mode) |
+| [Network CFT](CFT/network.yaml) | CloudFormation template to create VPC, subnets, jumpbox |
+| [Install Role CFT — Mode 1](CFT/install_role.yaml) | Creates the Terraform deployment role (Promethium manages all IAM) |
+| [Install Role CFT — Mode 2](CFT/install_role_byoiam.yaml) | Creates the Terraform deployment role (customer-provided EKS roles) |
+| [Operational Roles CFT](CFT/operational_roles.yaml) | Creates post-install operational access roles |
+| [S3 Private Crawler](CFT/s3-private-crawler/) | VPC gateway endpoint and Glue network connection for private S3 access |
+| [Utilities](utilities/) | Helper scripts for tool installation and diagnostics |
