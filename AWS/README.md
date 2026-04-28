@@ -104,13 +104,6 @@ Use [`CFT/install_role_byoiam.yaml`](CFT/install_role_byoiam.yaml). This creates
 - **`PromethiumDeploymentRole-<company_name>`** — the Terraform deployment role, scoped to your pre-existing EKS cluster and worker role ARNs (passed as parameters).
 - **`PromethiumDeploymentRole-<company_name>InstanceProfile`** — EC2 instance profile for attaching the role to the install VM.
 
-<<<<<<< Updated upstream
-In Mode 2 your organisation also creates the base EKS roles independently before the Promethium install. Promethium's Terraform will create all OIDC/IRSA service roles automatically once the cluster is up.
-
-### Operational Roles
-
-For post-install operational access (e.g., read-only access for support), see [`CFT/operational_roles.yaml`](CFT/operational_roles.yaml).
-=======
 In Mode 2 your organisation also creates the operational roles (EKS cluster role, worker role, and all OIDC/IRSA roles) using [`CFT/operational_roles.yaml`](CFT/operational_roles.yaml) before the Promethium install begins.
 
 ### Operational Roles
@@ -118,7 +111,6 @@ In Mode 2 your organisation also creates the operational roles (EKS cluster role
 For all EKS operational roles (EBS/EFS CSI drivers, load balancer controller, cluster autoscaler, PG backup, Glue/Trino), see [`CFT/operational_roles.yaml`](CFT/operational_roles.yaml).
 
 > **Note:** `operational_roles.yaml` requires the EKS OIDC provider URL as a parameter. Deploy it initially with the default dummy value. After Phase 1a creates the cluster, update the stack with the real OIDC URL before continuing.
->>>>>>> Stashed changes
 
 ---
 
