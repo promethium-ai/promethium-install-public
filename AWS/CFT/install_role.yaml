@@ -25,11 +25,31 @@ Parameters:
     Type: String
     Default: prod
     AllowedValues:
+<<<<<<< Updated upstream
       - dev
       - qa
       - preview
       - prod
     Description: Deployment environment
+=======
+      - default
+      - custom
+    Description: Select whether to apply default tags or custom user-supplied tags.
+
+  CustomTags:
+    Type: String
+    Default: ""
+    Description: "Comma-separated key=value pairs. Example: Environment=qa,Owner=me@example.com"
+
+Mappings:
+  DefaultTags:
+    Values:
+      Environment: "prod"
+      Product: "Promethium"
+      Owner: "support@promethium.ai"
+      createdBy: "CloudFormation"
+      Project: "Intelligentedge"
+>>>>>>> Stashed changes
 
 Resources:
 
@@ -122,8 +142,65 @@ Resources:
               - acm:ListTagsForCertificate
             Resource: !Sub 'arn:aws:acm:${AWS::Region}:${AWS::AccountId}:certificate/*'
 
+<<<<<<< Updated upstream
   EFSPolicy:
     Type: AWS::IAM::ManagedPolicy
+=======
+          SUCCESS = "SUCCESS"
+          FAILED = "FAILED"
+
+          http = urllib3.PoolManager()
+
+          def send_response(event, context, response_status, response_data):
+              response_url = event['ResponseURL']
+
+              response_body = {
+                  'Status': response_status,
+                  'Reason': f"See CloudWatch Logs for details: {context.log_stream_name}",
+                  'PhysicalResourceId': context.log_stream_name,
+                  'StackId': event['StackId'],
+                  'RequestId': event['RequestId'],
+                  'LogicalResourceId': event['LogicalResourceId'],
+                  'Data': response_data
+              }
+
+              encoded = json.dumps(response_body).encode('utf-8')
+              headers = {'content-type': '', 'content-length': str(len(encoded))}
+              http.request("PUT", response_url, body=encoded, headers=headers)
+
+          def parse_custom_tags(raw):
+              if not raw:
+                  return {}
+              tags = {}
+              for pair in raw.split(","):
+                  if "=" in pair:
+                      key, value = pair.split("=", 1)
+                      tags[key.strip()] = value.strip()
+              return tags
+
+          def handler(event, context):
+              try:
+                  mode = event['ResourceProperties']['TagMode']
+                  default_tags = event['ResourceProperties']['DefaultTags']
+                  custom_raw = event['ResourceProperties']['CustomTags']
+
+                  merged = {str(k): str(v) for k, v in default_tags.items()}
+
+                  if mode == "custom":
+                      custom_map = parse_custom_tags(custom_raw)
+                      merged.update(custom_map)
+
+                  tag_list = [{"Key": k, "Value": v} for k, v in merged.items()]
+
+                  send_response(event, context, SUCCESS, {"Tags": tag_list})
+
+              except Exception as e:
+                  send_response(event, context, FAILED, {"Error": str(e)})
+
+  TagResolver:
+    Type: Custom::TagResolver
+    DependsOn: TagResolverFunction
+>>>>>>> Stashed changes
     Properties:
       ManagedPolicyName: !Sub '${PromethiumInstallRole}-efs'
       PolicyDocument:
@@ -506,6 +583,7 @@ Resources:
         - !Ref STSPolicy
         - !Ref IAMPolicy
       Path: /
+<<<<<<< Updated upstream
       Tags:
         - Key: Environment
           Value: !Ref Environment
@@ -517,6 +595,464 @@ Resources:
           Value: CloudFormation
         - Key: Project
           Value: Intelligentedge
+=======
+      Tags: !GetAtt TagResolver.Tags
+
+      Policies:
+        - PolicyName: promethium-terraform-ec2-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: EC2CoreActions
+                Effect: Allow
+                Action:
+                  - ec2:AttachVolume
+                  - ec2:CreateLaunchTemplate
+                  - ec2:CreateLaunchTemplateVersion
+                  - ec2:DeleteLaunchTemplate
+                  - ec2:CreateKeyPair
+                  - ec2:DeleteKeyPair
+                  - ec2:CreateVolume
+                  - ec2:AttachNetworkInterface
+                  - ec2:DetachNetworkInterface
+                  - ec2:DeleteNetworkInterface
+                  - ec2:ModifyInstanceAttribute
+                  - ec2:RunInstances
+                  - ec2:TerminateInstances
+                  - ec2:DetachVolume
+                  - ec2:CreateNetworkInterface
+                Resource:
+                  - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*'
+                  - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:launch-template/*'
+                  - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:key-pair/*'
+                  - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:volume/*'
+                  - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*'
+                  - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*'
+                  - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:subnet/*'
+                  - !Sub 'arn:aws:ec2:${AWS::Region}::image/*'
+              - Sid: EC2DescribeActions
+                Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:DescribeInstanceStatus
+                  - ec2:DescribeInstanceAttribute
+                  - ec2:DescribeInstanceTypes
+                  - ec2:DescribeIamInstanceProfileAssociations
+                  - ec2:DescribeInstanceCreditSpecifications
+                  - ec2:DescribeVolumes
+                  - ec2:DescribeKeyPairs
+                  - ec2:DescribeLaunchTemplates
+                  - ec2:DescribeLaunchTemplateVersions
+                  - ec2:DescribeImages
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DescribeTags
+                Resource: "*"
+              - Sid: EC2Tagging
+                Effect: Allow
+                Action:
+                  - ec2:CreateTags
+                  - ec2:DeleteTags
+                Resource: "*"
+              - Sid: SSMParameter
+                Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource: !Sub 'arn:aws:ssm:${AWS::Region}::parameter/aws/service/eks/optimized-ami/*/amazon-linux-*/recommended/release_version'
+        - PolicyName: promethium-terraform-acm-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ACMCertGetPermissions
+                Effect: Allow
+                Action:
+                  - acm:RequestCertificate
+                  - acm:ListCertificates
+                  - acm:GetCertificate
+                Resource: "*"
+              - Sid: ACMCertCreatePermissions
+                Effect: Allow
+                Action:
+                  - acm:DeleteCertificate
+                  - acm:DescribeCertificate
+                  - acm:AddTagsToCertificate
+                  - acm:ListTagsForCertificate
+                Resource: !Sub 'arn:aws:acm:${AWS::Region}:${AWS::AccountId}:certificate/*'
+
+        - PolicyName: promethium-terraform-efs-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: EFSPermissions
+                Effect: Allow
+                Action:
+                  - elasticfilesystem:ModifyMountTargetSecurityGroups
+                  - elasticfilesystem:DescribeMountTargets
+                  - elasticfilesystem:UntagResource
+                  - elasticfilesystem:CreateMountTarget
+                  - elasticfilesystem:DescribeLifecycleConfiguration
+                  - elasticfilesystem:DescribeAccessPoints
+                  - elasticfilesystem:DescribeFileSystems
+                  - elasticfilesystem:DeleteMountTarget
+                  - elasticfilesystem:DeleteFileSystem
+                  - elasticfilesystem:TagResource
+                  - elasticfilesystem:DescribeMountTargetSecurityGroups
+                Resource:
+                  - !Sub 'arn:aws:elasticfilesystem:${AWS::Region}:${AWS::AccountId}:access-point/*'
+                  - !Sub 'arn:aws:elasticfilesystem:${AWS::Region}:${AWS::AccountId}:file-system/*'
+              - Sid: EFSCreatePermissions
+                Effect: Allow
+                Action:
+                  - elasticfilesystem:CreateFileSystem
+                Resource: "*"
+
+        - PolicyName: promethium-terraform-eks-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: EKSPermissions
+                Effect: Allow
+                Action:
+                  - eks:UpdateClusterVersion
+                  - eks:ListNodegroups
+                  - eks:UntagResource
+                  - eks:ListTagsForResource
+                  - eks:UpdateClusterConfig
+                  - eks:CreateNodegroup
+                  - eks:DeleteCluster
+                  - eks:CreateFargateProfile
+                  - eks:UpdateNodegroupVersion
+                  - eks:ListFargateProfiles
+                  - eks:DescribeNodegroup
+                  - eks:ListUpdates
+                  - eks:DeleteNodegroup
+                  - eks:DescribeUpdate
+                  - eks:TagResource
+                  - eks:UpdateNodegroupConfig
+                  - eks:DescribeCluster
+                Resource:
+                  - !Sub 'arn:aws:eks:${AWS::Region}:${AWS::AccountId}:cluster/promethium*'
+                  - !Sub 'arn:aws:eks:${AWS::Region}:${AWS::AccountId}:nodegroup/promethium*/*/*'
+              - Sid: EKSCreatePermissions
+                Effect: Allow
+                Action:
+                  - eks:ListClusters
+                  - eks:CreateCluster
+                Resource: !Sub 'arn:aws:eks:${AWS::Region}:${AWS::AccountId}:cluster/*'
+
+        - PolicyName: promethium-terraform-elb-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: VisualEditor0
+                Effect: Allow
+                Action:
+                  - elasticloadbalancing:DescribeLoadBalancerAttributes
+                  - elasticloadbalancing:DescribeLoadBalancers
+                  - elasticloadbalancing:DescribeTags
+                Resource: "*"
+
+        - PolicyName: promethium-terraform-glue-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: GlueDatabaseManagement
+                Effect: Allow
+                Action:
+                  - glue:CreateDatabase
+                  - glue:DeleteDatabase
+                  - glue:UpdateDatabase
+                  - glue:GetDatabase
+                  - glue:GetDatabases
+                Resource:
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:database/*_trino'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:database/*_trino*/*'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/*trino*/*'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:userDefinedFunction/*trino*/*'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:catalog'
+              - Sid: GlueCatalogAccess
+                Effect: Allow
+                Action:
+                  - glue:GetTags
+                  - glue:TagResource
+                Resource:
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:catalog'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:database/*_trino'
+              - Sid: GlueReadOnlyAccess
+                Effect: Allow
+                Action:
+                  - glue:GetDatabase
+                  - glue:GetDatabases
+                Resource: "*"
+
+        - PolicyName: promethium-terraform-s3-kms-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: S3BucketManagement
+                Effect: Allow
+                Action:
+                  - s3:CreateBucket
+                  - s3:DeleteBucket
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                  - s3:DeleteObjectVersion
+                Resource:
+                  - arn:aws:s3:::*trino-*
+                  - arn:aws:s3:::*postgres-backups-*
+              - Sid: S3BucketConfiguration
+                Effect: Allow
+                Action:
+                  - s3:PutBucketPolicy
+                  - s3:GetBucketPolicy
+                  - s3:DeleteBucketPolicy
+                  - s3:PutEncryptionConfiguration
+                  - s3:GetEncryptionConfiguration
+                  - s3:PutLifecycleConfiguration
+                  - s3:GetLifecycleConfiguration
+                  - s3:PutBucketVersioning
+                  - s3:GetBucketVersioning
+                  - s3:PutBucketTagging
+                  - s3:GetBucketTagging
+                Resource:
+                  - arn:aws:s3:::*trino-*
+                  - arn:aws:s3:::*postgres-backups-*
+              - Sid: S3ReadOnlyAccess
+                Effect: Allow
+                Action:
+                  - s3:GetBucket*
+                  - s3:List*
+                  - s3:GetAccelerateConfiguration
+                  - s3:GetReplicationConfiguration
+                Resource:
+                  - arn:aws:s3:::*trino-*
+                  - arn:aws:s3:::*postgres-backups-*
+              - Sid: KMSCryptoAccess
+                Effect: Allow
+                Action:
+                  - kms:GenerateDataKey
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:DescribeKey
+                  - kms:ReEncrypt*
+                Resource: arn:aws:kms:*:*:key/*
+              - Sid: VisualEditor2
+                Effect: Allow
+                Action:
+                  - kms:EnableKeyRotation
+                  - kms:EnableKey
+                  - kms:Decrypt
+                  - kms:ListKeyPolicies
+                  - kms:UntagResource
+                  - kms:PutKeyPolicy
+                  - kms:GetKeyPolicy
+                  - kms:Verify
+                  - kms:ListResourceTags
+                  - kms:DisableKey
+                  - kms:DisableKeyRotation
+                  - kms:TagResource
+                  - kms:Encrypt
+                  - kms:GetKeyRotationStatus
+                  - kms:ScheduleKeyDeletion
+                  - kms:CreateAlias
+                  - kms:DescribeKey
+                  - kms:Sign
+                  - kms:DeleteAlias
+                Resource:
+                  - !Sub 'arn:aws:kms:${AWS::Region}:${AWS::AccountId}:alias/*'
+                  - !Sub 'arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*'
+              - Sid: CreateListonStar
+                Effect: Allow
+                Action:
+                  - kms:CreateKey
+                  - kms:ListAliases
+                Resource: "*"
+
+        - PolicyName: promethium-terraform-vpc-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: VPCModifyResources
+                Effect: Allow
+                Action:
+                  - ec2:CreateVpc
+                  - ec2:DeleteVpc
+                  - ec2:ModifyVpcAttribute
+                  - ec2:EnableVpcClassicLink
+                  - ec2:DisableVpcClassicLink
+                  - ec2:EnableVpcClassicLinkDnsSupport
+                Resource: "*"
+              - Sid: SubnetModifyResources
+                Effect: Allow
+                Action:
+                  - ec2:CreateSubnet
+                  - ec2:DeleteSubnet
+                  - ec2:ModifySubnetAttribute
+                Resource: "*"
+              - Sid: InternetAndNatGateway
+                Effect: Allow
+                Action:
+                  - ec2:CreateInternetGateway
+                  - ec2:DeleteInternetGateway
+                  - ec2:AttachInternetGateway
+                  - ec2:DetachInternetGateway
+                  - ec2:CreateNatGateway
+                  - ec2:DeleteNatGateway
+                Resource: "*"
+              - Sid: RouteTableActions
+                Effect: Allow
+                Action:
+                  - ec2:CreateRouteTable
+                  - ec2:DeleteRouteTable
+                  - ec2:CreateRoute
+                  - ec2:DeleteRoute
+                  - ec2:AssociateRouteTable
+                  - ec2:DisassociateRouteTable
+                Resource: "*"
+              - Sid: SecurityGroupActions
+                Effect: Allow
+                Action:
+                  - ec2:CreateSecurityGroup
+                  - ec2:DeleteSecurityGroup
+                  - ec2:AuthorizeSecurityGroupIngress
+                  - ec2:RevokeSecurityGroupIngress
+                  - ec2:AuthorizeSecurityGroupEgress
+                  - ec2:RevokeSecurityGroupEgress
+                Resource:
+                  - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*'
+                  - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:vpc/*'
+              - Sid: ElasticIPActions
+                Effect: Allow
+                Action:
+                  - ec2:AllocateAddress
+                  - ec2:ReleaseAddress
+                  - ec2:AssociateAddress
+                Resource:
+                  - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:elastic-ip/*'
+                  - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*'
+                  - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*'
+              - Sid: ElasticIPDisassociateActions
+                Effect: Allow
+                Action:
+                  - ec2:DisassociateAddress
+                Resource: "*"
+              - Sid: VPCDescribeResources
+                Effect: Allow
+                Action:
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeInternetGateways
+                  - ec2:DescribeNatGateways
+                  - ec2:DescribeRouteTables
+                  - ec2:DescribeAddresses
+                  - ec2:DescribeAddressesAttribute
+                  - ec2:DescribeVpcAttribute
+                  - ec2:DescribeVpcClassicLink
+                  - ec2:DescribeVpcClassicLinkDnsSupport
+                  - ec2:DescribeAvailabilityZones
+                  - ec2:DescribeSecurityGroups
+                Resource: "*"
+
+        - PolicyName: promethium-terraform-sts-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: PromethiumSTSAccess
+                Effect: Allow
+                Action:
+                  - sts:GetServiceBearerToken
+                  - sts:AssumeRole
+                Resource:
+                  - arn:aws:iam::734236616923:role/promethium-terraform-saas-assume-role
+                  - arn:aws:iam::308611924187:role/promethium-terraform-saas-assume-role
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${PromethiumInstallRole}'
+
+        - PolicyName: promethium-terraform-iam-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: IAMRoleManagement
+                Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:GetRole
+                  - iam:ListRoles
+                  - iam:UpdateAssumeRolePolicy
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:PutRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:ListRoleTags
+                Resource:
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/promethium-*'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/datafabric-*'
+              - Sid: IAMInstanceProfileManagement
+                Effect: Allow
+                Action:
+                  - iam:CreateInstanceProfile
+                  - iam:DeleteInstanceProfile
+                  - iam:GetInstanceProfile
+                  - iam:AddRoleToInstanceProfile
+                  - iam:RemoveRoleFromInstanceProfile
+                  - iam:ListInstanceProfiles
+                  - iam:ListInstanceProfilesForRole
+                  - iam:TagInstanceProfile
+                Resource:
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:instance-profile/promethium-*'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:instance-profile/datafabric-*'
+              - Sid: OIDCProviderManagement
+                Effect: Allow
+                Action:
+                  - iam:CreateOpenIDConnectProvider
+                  - iam:DeleteOpenIDConnectProvider
+                  - iam:GetOpenIDConnectProvider
+                  - iam:UpdateOpenIDConnectProviderThumbprint
+                  - iam:ListOpenIDConnectProviders
+                  - iam:TagOpenIDConnectProvider
+                Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:oidc-provider/*'
+              - Sid: PassRoleToAWS
+                Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource:
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/promethium-*'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/datafabric-*'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/*eks*'
+              - Sid: IAMReadOnly
+                Effect: Allow
+                Action:
+                  - iam:GetServiceLinkedRoleDeletionStatus
+                  - iam:CreateServiceLinkedRole
+                  - iam:ListPolicies
+                  - iam:ListRoles
+                  - iam:ListAttachedRolePolicies
+                Resource: '*'
+              - Sid: IAMServiceLinkedRoleCheck
+                Effect: Allow
+                Action:
+                  - iam:GetRole
+                  - iam:CreateServiceLinkedRole
+                Resource:
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/aws-service-role/*'
+                  - 'arn:aws:iam::aws:policy/aws-service-role/*'
+
+        - PolicyName: promethium-terraform-cfn-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: CloudFormationReadOnly
+                Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
+                  - cloudformation:ListStacks
+                  - cloudformation:DescribeStackEvents
+                Resource: '*'
+>>>>>>> Stashed changes
 
   TerraformInstanceProfile:
     Type: AWS::IAM::InstanceProfile

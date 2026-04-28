@@ -104,11 +104,21 @@ Use [`CFT/install_role_byoiam.yaml`](CFT/install_role_byoiam.yaml). This creates
 - **`PromethiumDeploymentRole-<company_name>`** — the Terraform deployment role, scoped to your pre-existing EKS cluster and worker role ARNs (passed as parameters).
 - **`PromethiumDeploymentRole-<company_name>InstanceProfile`** — EC2 instance profile for attaching the role to the install VM.
 
+<<<<<<< Updated upstream
 In Mode 2 your organisation also creates the base EKS roles independently before the Promethium install. Promethium's Terraform will create all OIDC/IRSA service roles automatically once the cluster is up.
 
 ### Operational Roles
 
 For post-install operational access (e.g., read-only access for support), see [`CFT/operational_roles.yaml`](CFT/operational_roles.yaml).
+=======
+In Mode 2 your organisation also creates the operational roles (EKS cluster role, worker role, and all OIDC/IRSA roles) using [`CFT/operational_roles.yaml`](CFT/operational_roles.yaml) before the Promethium install begins.
+
+### Operational Roles
+
+For all EKS operational roles (EBS/EFS CSI drivers, load balancer controller, cluster autoscaler, PG backup, Glue/Trino), see [`CFT/operational_roles.yaml`](CFT/operational_roles.yaml).
+
+> **Note:** `operational_roles.yaml` requires the EKS OIDC provider URL as a parameter. Deploy it initially with the default dummy value. After Phase 1a creates the cluster, update the stack with the real OIDC URL before continuing.
+>>>>>>> Stashed changes
 
 ---
 
@@ -140,6 +150,7 @@ Before starting the deployment, provide the following to your Promethium technic
 
 ### VPC and Subnets
 
+<<<<<<< Updated upstream
 | # | Item |
 |---|------|
 | 4 | VPC ID (or confirm you want Promethium to create it) |
@@ -209,6 +220,99 @@ terraform destroy -var="ghcr_token=$GHCR_TOKEN"
 
 ## 8. Additional Resources
 
+=======
+If you used the Promethium [network CloudFormation template](CFT/network.yaml), these values are in the stack outputs. Otherwise, look them up in the AWS Console:
+
+**AWS Console → VPC → Your VPCs**
+- Find the VPC created for Promethium
+- Note the **VPC ID** (e.g. `vpc-0abc123...`) and **IPv4 CIDR** (e.g. `10.0.0.0/22`)
+
+**AWS Console → VPC → Subnets** (filter by your VPC ID)
+- Identify the **2 private subnets** — these route through a NAT Gateway, not an Internet Gateway
+- To confirm: click each subnet → **Route table** tab → check the default route (`0.0.0.0/0`) points to a `nat-` target, not an `igw-` target
+- Note both Subnet IDs and confirm they are in **2 different Availability Zones**
+
+| # | Item |
+|---|------|
+| 4 | VPC ID (e.g. `vpc-0abc123...`) |
+| 5 | VPC CIDR block (e.g. `10.0.0.0/22`) |
+| 6a | Private Subnet 1 ID — AZ-a (routes via NAT Gateway) |
+| 6b | Private Subnet 2 ID — AZ-b (routes via NAT Gateway) |
+
+### Install VM
+
+**AWS Console → EC2 → Instances**
+- Find your jumpbox / install VM
+- Note the **Instance ID** (`i-xxx`) — needed to attach the Promethium install role
+- Click the instance → **Security** tab → note the **Security Group ID** (`sg-xxx`) attached to it — this is used as `jumpbox_sg_id`
+
+| # | Item |
+|---|------|
+| 7 | Jumpbox Instance ID (`i-xxx`) |
+| 8 | Jumpbox Security Group ID (`sg-xxx`) |
+
+### Mode 2 Only — Pre-existing IAM Role ARNs
+
+If your organisation pre-created all EKS and OIDC roles (via `operational_roles.yaml` or manually), provide the stack name or all 8 role ARNs. Your Promethium representative will run the discovery tool to identify them if names are unknown:
+
+```bash
+./AWS/utilities/verify_operational_roles.sh <company_name> <region> --discover
+```
+
+### Provided by Promethium
+
+The following will be supplied by Promethium — no action needed from you:
+
+| Item | Description |
+|------|-------------|
+| `promethium_image_tag` | Application version to deploy |
+| `company_name` | Agreed upon jointly with your Promethium representative |
+| GitHub PAT | Personal Access Token for private Terraform modules |
+| GHCR Token | Token for pulling Helm charts |
+
+---
+
+## 6. Verification
+
+After deployment your Promethium associate will confirm the following:
+
+```bash
+# Update kubeconfig
+aws eks update-kubeconfig \
+  --name promethium-datafabric-<env>-<company_name>-eks-cluster \
+  --region <aws_region>
+
+# Check all pods are running
+kubectl get pods -n intelligentedge
+kubectl get pods -n cluster-management
+
+# Check the ALB ingress hostname
+kubectl get ingress -n intelligentedge
+```
+
+All pods should be `Running` or `Completed`. The `ADDRESS` field on the ingress is the ALB DNS name used for your Promethium subdomains.
+
+> **Important:** Post-deployment, the Promethium associate must reset the default support user password and update dependent services. See the [post-install credentials runbook](https://pm61data.atlassian.net/wiki/x/AgBfmw).
+
+---
+
+## 7. Teardown
+
+```bash
+# Destroy Postgres first to avoid dependency issues
+terraform destroy \
+  -target=module.promethium.module.postgres \
+  -var="ghcr_token=$GHCR_TOKEN"
+
+# Destroy everything else
+terraform destroy -var="ghcr_token=$GHCR_TOKEN"
+```
+
+---
+
+## 8. Additional Resources
+
+>>>>>>> Stashed changes
 | Resource | Description |
 |----------|-------------|
 | [Mode 1 Install Guide](README-vpc-only.md) | Step-by-step guide for Promethium associates (VPC Only mode) |
@@ -216,6 +320,12 @@ terraform destroy -var="ghcr_token=$GHCR_TOKEN"
 | [Network CFT](CFT/network.yaml) | CloudFormation template to create VPC, subnets, jumpbox |
 | [Install Role CFT — Mode 1](CFT/install_role.yaml) | Creates the Terraform deployment role (Promethium manages all IAM) |
 | [Install Role CFT — Mode 2](CFT/install_role_byoiam.yaml) | Creates the Terraform deployment role (customer-provided EKS roles) |
+<<<<<<< Updated upstream
 | [Operational Roles CFT](CFT/operational_roles.yaml) | Creates post-install operational access roles |
 | [S3 Private Crawler](CFT/s3-private-crawler/) | VPC gateway endpoint and Glue network connection for private S3 access |
 | [Utilities](utilities/) | Helper scripts for tool installation and diagnostics |
+=======
+| [Operational Roles CFT](CFT/operational_roles.yaml) | Creates EKS cluster role, worker role, and all 6 OIDC/IRSA roles |
+| [S3 Private Crawler](CFT/s3-private-crawler/) | VPC gateway endpoint and Glue network connection for private S3 access |
+| [Utilities](utilities/) | Helper scripts for tool installation, role verification, and diagnostics |
+>>>>>>> Stashed changes
