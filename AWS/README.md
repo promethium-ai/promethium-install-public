@@ -77,7 +77,7 @@ Deploy [`CFT/install_role.yaml`](CFT/install_role.yaml). This creates:
 
 | Role | Used By | Purpose |
 |------|---------|---------|
-| `PromethiumDeploymentRole-<company_name>` | Install VM (jumpbox) | Terraform deployment role — attached to the install VM as an EC2 instance profile. Used to create and configure all Promethium infrastructure |
+| `PromethiumDeploymentRole` | Install VM (jumpbox) | Terraform deployment role — attached to the install VM as an EC2 instance profile. Used to create and configure all Promethium infrastructure |
 
 > The role is created as an **EC2 Instance Profile** and attached directly to the install VM. No access keys are needed.
 
@@ -90,7 +90,7 @@ aws cloudformation create-stack \
   --stack-name promethium-verifier-policy \
   --template-body file://AWS/CFT/verifier_policy.yaml \
   --parameters \
-    ParameterKey=PromethiumInstallRole,ParameterValue=PromethiumDeploymentRole-<company_name> \
+    ParameterKey=PromethiumInstallRole,ParameterValue=PromethiumDeploymentRole \
   --capabilities CAPABILITY_NAMED_IAM \
   --region <aws_region>
 ```
