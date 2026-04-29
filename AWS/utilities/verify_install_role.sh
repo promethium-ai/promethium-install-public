@@ -223,6 +223,17 @@ else
       ${IAM_POLICY_FIX}"
 fi
 
+# iam:UpdateAssumeRolePolicy check (required for OIDC trust policy updates on IRSA roles)
+if [ "$(check_iam_action_on_iam_resource UpdateAssumeRolePolicy)" = "ok" ]; then
+  check_pass "iam:UpdateAssumeRolePolicy scoped to IAM role resources (required for OIDC trust policy updates)"
+elif echo "$COMBINED_IAM" | grep -q "iam:UpdateAssumeRolePolicy"; then
+  check_fail "iam:UpdateAssumeRolePolicy" "Scoped to wrong resource — OIDC trust policy updates will fail. Fix:
+      ${IAM_POLICY_FIX}"
+else
+  check_fail "iam:UpdateAssumeRolePolicy" "MISSING — OIDC trust policy updates on IRSA roles will fail during Phase 1c. Fix:
+      ${IAM_POLICY_FIX}"
+fi
+
 # iam:GetRole on service-linked roles (required for EKS nodegroup SLR validation)
 SLR_FIX="aws iam put-role-policy --role-name ${ROLE_NAME} --policy-name promethium-terraform-iam-slr-policy --policy-document '{\"Version\":\"2012-10-17\",\"Statement\":[{\"Sid\":\"IAMServiceLinkedRoleCheck\",\"Effect\":\"Allow\",\"Action\":[\"iam:GetRole\",\"iam:CreateServiceLinkedRole\"],\"Resource\":[\"arn:aws:iam::${ACCOUNT_ID}:role/aws-service-role/*\"]}]}'"
 
