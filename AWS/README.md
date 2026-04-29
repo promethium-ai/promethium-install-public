@@ -75,8 +75,11 @@ Deploy these two CFTs in the customer account before starting the Promethium ins
 
 Deploy [`CFT/install_role.yaml`](CFT/install_role.yaml). This creates:
 
-- **`PromethiumDeploymentRole-<company_name>`** — the Terraform deployment role attached to the install VM
-- **`PromethiumDeploymentRole-<company_name>InstanceProfile`** — EC2 instance profile for the install VM
+| Role | Used By | Purpose |
+|------|---------|---------|
+| `PromethiumDeploymentRole-<company_name>` | Install VM (jumpbox) | Terraform deployment role — attached to the install VM as an EC2 instance profile. Used to create and configure all Promethium infrastructure |
+
+> The role is created as an **EC2 Instance Profile** and attached directly to the install VM. No access keys are needed.
 
 ### Step 2 — Operational Roles
 
@@ -85,7 +88,18 @@ Deploy [`CFT/operational_roles.yaml`](CFT/operational_roles.yaml) with:
 - `ClusterName` = `promethium-datafabric-prod-<company_name>-eks-cluster`
 - `OIDCProviderUrl` = leave as default dummy value (updated automatically after Phase 1a)
 
-This creates all 8 operational roles: EKS cluster role, worker node role, and 6 OIDC/IRSA roles.
+This creates all 8 operational roles:
+
+| Role | Used By | Purpose |
+|------|---------|---------|
+| `promethium-prod-eks-cluster-role` | EKS control plane | Gives the EKS control plane permissions to run the cluster, manage AWS infrastructure, and manage pod-level networking |
+| `promethium-prod-eks-worker-role` | EKS worker nodes | Allows nodes to pull container images from ECR, manage EFS volumes via CSI driver, and handle network management within EKS |
+| `promethium-prod-ebs-csi-driver-role` | EBS CSI driver | Allows the EBS CSI driver to provision, attach, delete, and snapshot encrypted EBS volumes using KMS keys |
+| `promethium-prod-efs-csi-driver-role` | EFS CSI driver | Allows the EFS CSI driver to provision and manage EFS file systems and access points |
+| `promethium-prod-lb-controller-role` | Load Balancer Controller | Allows the LB Controller to provision and manage ALBs/NLBs on behalf of Kubernetes ingress and service resources |
+| `promethium-prod-cluster-autoscaler-role` | Cluster Autoscaler | Allows the autoscaler to add or remove worker nodes in Auto Scaling Groups based on cluster demand |
+| `promethium-prod-pg-backup-role` | Postgres backup | Allows postgres backups to be written to S3 and container images to be pulled from ECR |
+| `promethium-prod-glue-trino-role` | Trino / Glue crawlers | Allows Trino to query and manage data in Glue Data Catalog and S3, handle KMS-encrypted data, and interact with Glue jobs |
 
 ---
 
@@ -171,4 +185,6 @@ terraform destroy -var="ghcr_token=$GHCR_TOKEN"
 | [Install Role CFT](CFT/install_role.yaml) | Creates the Terraform deployment role and instance profile |
 | [Operational Roles CFT](CFT/operational_roles.yaml) | Creates EKS cluster role, worker role, and all 6 OIDC/IRSA roles |
 | [S3 Private Crawler](CFT/s3-private-crawler/) | VPC gateway endpoint and Glue network connection for private S3 access |
+
+> For customers needing private S3 access for Trino and Glue crawlers, see the `CFT/s3-private-crawler` folder, which includes the deployment guidance and CloudFormation template for the gateway endpoint and Glue NETWORK connection.
 | [Utilities](utilities/) | Helper scripts for tool installation, role verification, and diagnostics |
