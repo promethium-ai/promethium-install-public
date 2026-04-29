@@ -24,22 +24,25 @@ Promethium is deployed with an **internal load balancer** — accessible via VPN
 
 Your VPC must be at least a `/22` CIDR (e.g., `10.0.0.0/22`). Promethium uses an **internal load balancer** — only private subnets are required. No public subnets are needed.
 
-| Subnet | Count | AZs | Routing | Required Tags |
+| Configuration | Private Subnets | AZs | Routing | Required Tags |
 |---|---|---|---|---|
-| **Private** (for EKS nodes + internal ALB) | 2+ | 2 different AZs | NAT Gateway | `kubernetes.io/role/internal-elb=1` |
+| **Required (minimum)** | 3 | 3 different AZs | NAT Gateway | `kubernetes.io/role/internal-elb=1` |
+| **Recommended** | 4 | 2+ different AZs | NAT Gateway | `kubernetes.io/role/internal-elb=1` |
 
-> ⚠️ **At least 2 private subnets in different AZs are required.** The internal ALB and EKS node groups both use these subnets.
+> ⚠️ **Minimum 3 private subnets across 3 availability zones are required.** The internal ALB and EKS node groups both use these subnets. More subnets across more AZs improve availability and provide additional IP space for nodes.
 
 > ⚠️ **EKS worker nodes must be placed in private subnets only.** Public subnets auto-assign public IPs to instances, which causes EKS node group creation to fail.
 
 > ℹ️ **Public subnets must not have kubernetes tags.** If your VPC has public subnets, ensure they have no `kubernetes.io/*` tags to avoid unintended ALB subnet discovery.
 
-### Example layout for a `10.0.0.0/22` VPC
+### Example layout for a `10.0.0.0/22` VPC (recommended — 4 private subnets)
 
 | Subnet | CIDR | AZ | Type | Purpose |
 |---|---|---|---|---|
 | subnet-1 | `10.0.0.0/24` | `us-east-1a` | Private | EKS worker nodes + internal ALB |
 | subnet-2 | `10.0.1.0/24` | `us-east-1b` | Private | EKS worker nodes + internal ALB |
+| subnet-3 | `10.0.2.0/24` | `us-east-1a` | Private | EKS worker nodes + internal ALB |
+| subnet-4 | `10.0.3.0/24` | `us-east-1b` | Private | EKS worker nodes + internal ALB |
 
 ### Required subnet tags
 
@@ -254,28 +257,8 @@ aws iam update-assume-role-policy \
 SSH or SSM into your install VM, then run:
 
 ```bash
-# Terraform >= 1.14
-sudo yum install -y yum-utils
-sudo yum-config-manager --add-repo https://rpm.releases.hashicorp.com/AmazonLinux/hashicorp.repo
-sudo yum install -y terraform
-terraform -v
-
-# kubectl >= 1.29
-curl -LO "https://dl.k8s.io/release/$(curl -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
-kubectl version --client
-
-# Helm >= 3.20
-curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-helm version
-
-# AWS CLI v2
-curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-unzip awscliv2.zip && sudo ./aws/install
-aws --version
-
-# Python 3.10+
-python3 --version
+curl -O https://raw.githubusercontent.com/promethium-ai/promethium-install-public/main/AWS/utilities/install_tools.sh
+bash install_tools.sh
 ```
 
 Or use the install script provided in this repo:
