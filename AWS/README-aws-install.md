@@ -22,25 +22,24 @@ Promethium is deployed with an **internal load balancer** — accessible via VPN
 
 ## 🌐 2. VPC & Subnet Requirements
 
-Your VPC must be at least a `/22` CIDR (e.g., `10.0.0.0/22`). Within it, you need **4 subnets** across **2 availability zones**:
+Your VPC must be at least a `/22` CIDR (e.g., `10.0.0.0/22`). Promethium uses an **internal load balancer** — only private subnets are required. No public subnets are needed.
 
 | Subnet | Count | AZs | Routing | Required Tags |
 |---|---|---|---|---|
-| **Public** (for ALB) | 2 | 2 different AZs | Internet Gateway | `kubernetes.io/role/elb=1` |
-| **Private** (for EKS nodes) | 2 | 2 different AZs | NAT Gateway | `kubernetes.io/role/internal-elb=1` |
+| **Private** (for EKS nodes + internal ALB) | 2+ | 2 different AZs | NAT Gateway | `kubernetes.io/role/internal-elb=1` |
 
-> ⚠️ **Two public subnets in different AZs are required.** AWS Application Load Balancer (ALB) requires subnets in at least 2 availability zones. A single public subnet will cause ALB provisioning to fail.
+> ⚠️ **At least 2 private subnets in different AZs are required.** The internal ALB and EKS node groups both use these subnets.
 
 > ⚠️ **EKS worker nodes must be placed in private subnets only.** Public subnets auto-assign public IPs to instances, which causes EKS node group creation to fail.
+
+> ℹ️ **Public subnets must not have kubernetes tags.** If your VPC has public subnets, ensure they have no `kubernetes.io/*` tags to avoid unintended ALB subnet discovery.
 
 ### Example layout for a `10.0.0.0/22` VPC
 
 | Subnet | CIDR | AZ | Type | Purpose |
 |---|---|---|---|---|
-| subnet-1 | `10.0.0.0/24` | `us-east-1a` | Private | EKS worker nodes |
-| subnet-2 | `10.0.1.0/24` | `us-east-1b` | Private | EKS worker nodes |
-| subnet-3 | `10.0.2.0/24` | `us-east-1b` | Public | ALB (internet-facing) |
-| subnet-4 | `10.0.3.0/24` | `us-east-1a` | Public | ALB (internet-facing) |
+| subnet-1 | `10.0.0.0/24` | `us-east-1a` | Private | EKS worker nodes + internal ALB |
+| subnet-2 | `10.0.1.0/24` | `us-east-1b` | Private | EKS worker nodes + internal ALB |
 
 ### Required subnet tags
 
