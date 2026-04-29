@@ -1,6 +1,8 @@
-# ✅ Promethium Intelligent Edge — AWS VPC + Base IAM Installation Guide
+# ✅ Promethium Intelligent Edge — AWS Installation Guide
 
-In this mode, the customer provides an existing VPC (with subnets and routing) and the two base EKS IAM roles (EKS cluster role + worker node role). Promethium's Terraform creates the EKS cluster, all OIDC/IRSA service-account roles, EKS add-ons, and the full Promethium application stack.
+The customer provides an existing VPC (with subnets and routing), the Terraform install role (`install_role.yaml`), and all operational IAM roles (`operational_roles.yaml`). Promethium's Terraform creates the EKS cluster, configures OIDC trust policies, deploys EKS add-ons, and installs the full Promethium application stack.
+
+Promethium is deployed with an **internal load balancer** — accessible via VPN only.
 
 ---
 
@@ -331,21 +333,28 @@ vpc_info = {
 }
 
 # ── IAM ───────────────────────────────────────────────────────────────────────
-# Customer provides the base EKS roles; Terraform creates the OIDC/IRSA roles
-iam_role_create      = false   # Use the ARNs from Stack 2
-aws_iam_oidc_enabled = true    # Terraform creates all 6 OIDC/IRSA roles
+# All IAM roles pre-created by customer via operational_roles.yaml CFT
+iam_role_create      = false
+aws_iam_oidc_enabled = false
 
-cluster_role_arn = "<EKSClusterRoleArn from Stack 2>"
-worker_role_arn  = "<EKSWorkerRoleArn from Stack 2>"
+cluster_role_arn                = "<EKSClusterRoleArn from operational_roles stack>"
+worker_role_arn                 = "<EKSWorkerNodeRoleArn from operational_roles stack>"
+aws_ebs_driver_role_arn         = "<EBSCSIDriverRoleArn from operational_roles stack>"
+aws_efs_driver_role_arn         = "<EFSCSIDriverRoleArn from operational_roles stack>"
+aws_lb_controller_role_arn      = "<LoadBalancerControllerRoleArn from operational_roles stack>"
+aws_eks_autoscaler_role_arn     = "<ClusterAutoscalerRoleArn from operational_roles stack>"
+pg_backup_cronjob_oidc_role_arn = "<PGBackupServiceRoleArn from operational_roles stack>"
+trino_oidc_role_arn             = "<GlueTrinoServiceRoleArn from operational_roles stack>"
 
 # ── EKS ───────────────────────────────────────────────────────────────────────
 custom_cluster_name = true
 eks_cluster_name    = "promethium-datafabric-<env>-<company_name>-eks-cluster"
-eks_cluster_type    = "public"   # public | private
+eks_cluster_type    = "private"
 jumpbox_enabled     = false
+loadbalancer_type   = "internal"
 
-jumpbox_sg_id                 = "<JumpboxSecurityGroupId from network CFT output>"
-jumpbox_instance_profile_name = "<EKSWorkerInstanceProfileName from Stack 2>"
+jumpbox_sg_id                 = "<JumpboxSecurityGroupId>"
+jumpbox_instance_profile_name = "<InstanceProfileName from install_role stack>"
 
 # ── Promethium application ────────────────────────────────────────────────────
 promethium_image_tag = "<image_tag>"   # e.g. 24.2.2

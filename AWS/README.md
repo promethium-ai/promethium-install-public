@@ -6,20 +6,14 @@ The following steps describe how to deploy a secure Promethium Intelligent Edge 
 
 ---
 
-## 1. Deployment Modes
+## 1. How it works
 
-Promethium supports two deployment modes depending on how much of the AWS infrastructure your organisation manages directly.
+The customer provides the AWS infrastructure — VPC, subnets, install role, and operational IAM roles. Promethium's Terraform deploys the EKS cluster, configures OIDC trust policies, and installs the full Promethium application stack.
 
-| Mode | VPC | IAM Roles | Who runs it |
-|------|-----|-----------|-------------|
-| **Mode 1 — VPC Only** | Customer-provided | Promethium Terraform creates all roles | Promethium associate |
-| **Mode 2 — VPC + Base IAM** | Customer-provided | Customer creates EKS cluster & worker roles; Promethium Terraform creates OIDC/IRSA roles | Promethium associate |
-
-> Your Promethium technical representative will confirm which mode applies to your environment before the installation begins.
+Promethium is always deployed with an **internal load balancer** — accessible via VPN only.
 
 For detailed step-by-step installation instructions, your Promethium associate will follow:
-- [Mode 1 — VPC Only](README-vpc-only.md)
-- [Mode 2 — VPC + Base IAM](README-mode2-vpc-base-iam.md)
+- [AWS Install Guide](README-aws-install.md)
 
 ---
 
