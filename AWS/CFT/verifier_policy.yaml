@@ -1,0 +1,41 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Adds pre-install verification permissions to the Promethium deployment role. Deploy this before running the Promethium verifier scripts from the jumpbox.'
+
+Parameters:
+  PromethiumInstallRole:
+    Type: String
+    Default: PromethiumDeploymentRole
+    Description: Name of the Promethium deployment role to attach verifier permissions to
+
+Resources:
+  VerifierPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: promethium-verifier-policy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: CloudFormationRead
+            Effect: Allow
+            Action:
+              - cloudformation:DescribeStacks
+              - cloudformation:ListStacks
+            Resource: '*'
+          - Sid: IAMDiscovery
+            Effect: Allow
+            Action:
+              - iam:ListRoles
+              - iam:ListAttachedRolePolicies
+            Resource: '*'
+          - Sid: EKSDescribe
+            Effect: Allow
+            Action:
+              - eks:DescribeCluster
+            Resource: '*'
+      Roles:
+        - !Ref PromethiumInstallRole
+
+Outputs:
+  PolicyArn:
+    Description: ARN of the verifier policy
+    Value: !Sub 'arn:aws:iam::${AWS::AccountId}:policy/promethium-verifier-policy'
