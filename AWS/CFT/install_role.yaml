@@ -460,6 +460,7 @@ Resources:
               - iam:UntagRole
               - iam:TagInstanceProfile
               - iam:ListInstanceProfilesForRole
+              - iam:UpdateAssumeRolePolicy
             Resource:
               - !Sub 'arn:aws:iam::${AWS::AccountId}:role/*promethium*'
               - !Sub 'arn:aws:iam::${AWS::AccountId}:role/*datafabric*'
@@ -493,6 +494,10 @@ Resources:
           - Effect: Allow
             Principal:
               Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+          - Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${PromethiumInstallRole}'
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
