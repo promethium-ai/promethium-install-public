@@ -165,6 +165,8 @@ The template is located at [`AWS/CFT/network.yaml`](CFT/network.yaml) in this re
 
 #### What it creates
 
+TODO: ALL documents must reflect only the new subnet recommendation: 4 private subnets + 1 public subnet
+
 - VPC with configurable CIDR
 - 2 private subnets (NAT Gateway routing) — for EKS nodes
 - 2 public subnets (Internet Gateway routing) — for ALB
