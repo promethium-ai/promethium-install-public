@@ -121,8 +121,8 @@ Resources:
   # Subnet layout from a /22 (e.g. 10.0.0.0/22):
   #   Subnet1: .0.0/24  AZ-a  Private  EKS nodes
   #   Subnet2: .1.0/24  AZ-b  Private  EKS nodes
-  #   Subnet3: .2.0/24  AZ-b  Public   ALB + NAT Gateway
-  #   Subnet4: .3.0/24  AZ-a  Public   ALB
+  #   Subnet3: .2.0/24  AZ-c  Private  EKS nodes
+  #   Subnet4: .3.0/24  AZ-a  Public   NAT Gateway
 
   PrivateSubnet1:
     Type: AWS::EC2::Subnet
@@ -154,22 +154,22 @@ Resources:
         - Key: !Sub kubernetes.io/cluster/${EksClusterName}
           Value: owned
 
-  PublicSubnet1:
+  PrivateSubnet3:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPC
       CidrBlock: !Select [2, !Cidr [!Ref VpcCidrBlock, 4, 8]]
-      AvailabilityZone: !Select [1, !GetAZs '']
-      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [2, !GetAZs '']
+      MapPublicIpOnLaunch: false
       Tags:
         - Key: Name
-          Value: !Sub ${VpcName}-public-1
-        - Key: kubernetes.io/role/elb
+          Value: !Sub ${VpcName}-private-3
+        - Key: kubernetes.io/role/internal-elb
           Value: "1"
         - Key: !Sub kubernetes.io/cluster/${EksClusterName}
           Value: owned
 
-  PublicSubnet2:
+  PublicSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPC
@@ -178,11 +178,7 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: !Sub ${VpcName}-public-2
-        - Key: kubernetes.io/role/elb
-          Value: "1"
-        - Key: !Sub kubernetes.io/cluster/${EksClusterName}
-          Value: owned
+          Value: !Sub ${VpcName}-public-1
 
   # ── NAT Gateway ───────────────────────────────────────────────────────────────
 
@@ -228,12 +224,6 @@ Resources:
       SubnetId: !Ref PublicSubnet1
       RouteTableId: !Ref PublicRouteTable
 
-  PublicSubnet2RouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref PublicSubnet2
-      RouteTableId: !Ref PublicRouteTable
-
   PrivateRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -259,6 +249,12 @@ Resources:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnet3RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet3
       RouteTableId: !Ref PrivateRouteTable
 
   # ── Jumpbox ───────────────────────────────────────────────────────────────────
@@ -332,14 +328,14 @@ Outputs:
       Name: !Sub ${AWS::StackName}-Subnet2Id
 
   Subnet3Id:
-    Description: Public Subnet 1 ID (AZ-b) — ALB
-    Value: !Ref PublicSubnet1
+    Description: Private Subnet 3 ID (AZ-c) — use in vpc_info.subnet_ids
+    Value: !Ref PrivateSubnet3
     Export:
       Name: !Sub ${AWS::StackName}-Subnet3Id
 
   Subnet4Id:
-    Description: Public Subnet 2 ID (AZ-a) — ALB
-    Value: !Ref PublicSubnet2
+    Description: Public Subnet 1 ID (AZ-a) — NAT Gateway only, not used in tfvars
+    Value: !Ref PublicSubnet1
     Export:
       Name: !Sub ${AWS::StackName}-Subnet4Id
 

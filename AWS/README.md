@@ -38,6 +38,8 @@ This page documents instructions for the customer on how to setup prerequisites 
 ---
 # Overview
 
+TODO: get outputs automatically with aws cloudformation describe-stacks with outputs, rather than asking user to keep track of them.
+
 ### How it works
 
 Installing a Promethium Intelligent Edge (IE) cluster requires two parties:
@@ -168,11 +170,13 @@ The template is located at [`AWS/CFT/network.yaml`](CFT/network.yaml) in this re
 
 #### What it creates
 
-TODO: ALL documents must reflect only the new subnet recommendation: 4 private subnets + 1 public subnet
+TODO: reword this
+
+Internal ALB only (no public subnets needed for ALB) — 3 private + 1 public (for NAT GW) works, but requires customers to access Promethium over VPN/Direct Connect, not the public internet.
 
 - VPC with configurable CIDR
-- 2 private subnets (NAT Gateway routing) — for EKS nodes
-- 2 public subnets (Internet Gateway routing) — for ALB
+- 3 private subnets (NAT Gateway routing) — for EKS nodes
+- 1 public subnets (for VPN access)
 - Internet Gateway and NAT Gateway
 - Route tables and associations
 
@@ -205,8 +209,8 @@ aws cloudformation describe-stacks \
 | `VpcId` | `vpc_info.vpc_id` in tfvars; required input for jumpbox stack |
 | `Subnet1Id` | `vpc_info.subnet_ids` (private); required input for jumpbox stack |
 | `Subnet2Id` | `vpc_info.subnet_ids` (private) |
-| `Subnet3Id` | ALB public subnet (auto-tagged) |
-| `Subnet4Id` | ALB public subnet (auto-tagged) |
+| `Subnet3Id` | `vpc_info.subnet_ids` (private) |
+| `Subnet4Id` | public subnet, NAT Gateway only (not used in tfvars) |
 
 ---
 
@@ -233,11 +237,11 @@ for SUBNET_ID in <private_subnet_1> <private_subnet_2>; do
 done
 
 # Public subnets (ALB) — must be in 2 different AZs
-for SUBNET_ID in <public_subnet_1> <public_subnet_2>; do
-  aws ec2 create-tags --resources $SUBNET_ID --region $REGION --tags \
-    Key="kubernetes.io/cluster/${CLUSTER_NAME}",Value=owned \
-    Key="kubernetes.io/role/elb",Value=1
-done
+# for SUBNET_ID in <public_subnet_1> <public_subnet_2>; do
+#   aws ec2 create-tags --resources $SUBNET_ID --region $REGION --tags \
+#     Key="kubernetes.io/cluster/${CLUSTER_NAME}",Value=owned \
+#     Key="kubernetes.io/role/elb",Value=1
+# done
 ```
 
 ## 5. Jumpbox
