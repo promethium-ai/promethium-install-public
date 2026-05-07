@@ -46,16 +46,16 @@ Your VPC must be at least a `/22` CIDR (e.g., `10.0.0.0/22`). Promethium uses an
 
 ### Required subnet tags
 
-All 4 subnets must be tagged with the EKS cluster name **before** running Terraform:
+All private subnets must be tagged with the EKS cluster name **before** running Terraform:
 
 | Subnet type | Tag Key | Tag Value |
 |---|---|---|
-| Public | `kubernetes.io/role/elb` | `1` |
-| Public | `kubernetes.io/cluster/<cluster_name>` | `owned` |
 | Private | `kubernetes.io/role/internal-elb` | `1` |
 | Private | `kubernetes.io/cluster/<cluster_name>` | `owned` |
 
 Where `<cluster_name>` = `promethium-datafabric-<env>-<company_name>-eks-cluster`
+
+> **Public subnets must have no kubernetes tags** — if your VPC has public subnets, ensure they have no `kubernetes.io/*` tags.
 
 ---
 
@@ -68,8 +68,7 @@ The template is located at [`AWS/CFT/network.yaml`](CFT/network.yaml) in this re
 ### What it creates
 
 - VPC with configurable CIDR
-- 2 private subnets (NAT Gateway routing) — for EKS nodes
-- 2 public subnets (Internet Gateway routing) — for ALB
+- 4 private subnets (NAT Gateway routing) — for EKS nodes and internal ALB
 - Internet Gateway and NAT Gateway
 - Route tables and associations
 - Optional: jumpbox EC2 instance for running the Terraform installation
@@ -85,7 +84,7 @@ aws cloudformation create-stack \
     ParameterKey=VpcCidrBlock,ParameterValue=10.0.0.0/22 \
     ParameterKey=EksClusterName,ParameterValue=promethium-datafabric-<env>-<company_name>-eks-cluster \
     ParameterKey=JumpboxName,ParameterValue=<company_name>-jumpbox \
-    ParameterKey=UseExistingInstanceProfile,ParameterValue=PromethiumDeploymentRole-<company_name>InstanceProfile \
+    ParameterKey=UseExistingInstanceProfile,ParameterValue=PromethiumDeploymentRoleInstanceProfile \
   --capabilities CAPABILITY_NAMED_IAM \
   --region <aws_region>
 ```
@@ -108,8 +107,8 @@ aws cloudformation describe-stacks \
 | `VpcId` | `vpc_info.vpc_id` in tfvars |
 | `Subnet1Id` | `vpc_info.subnet_ids` (private) |
 | `Subnet2Id` | `vpc_info.subnet_ids` (private) |
-| `Subnet3Id` | ALB public subnet (auto-tagged) |
-| `Subnet4Id` | ALB public subnet (auto-tagged) |
+| `Subnet3Id` | `vpc_info.subnet_ids` (private) |
+| `Subnet4Id` | `vpc_info.subnet_ids` (private) |
 | `JumpboxInstanceId` | Install VM instance ID |
 | `JumpboxSecurityGroupId` | `jumpbox_sg_id` in tfvars |
 
@@ -130,18 +129,11 @@ Or apply them manually:
 CLUSTER_NAME="promethium-datafabric-<env>-<company_name>-eks-cluster"
 REGION="<aws_region>"
 
-# Private subnets (EKS nodes)
-for SUBNET_ID in <private_subnet_1> <private_subnet_2>; do
+# Private subnets (EKS nodes + internal ALB)
+for SUBNET_ID in <private_subnet_1> <private_subnet_2> <private_subnet_3>; do
   aws ec2 create-tags --resources $SUBNET_ID --region $REGION --tags \
     Key="kubernetes.io/cluster/${CLUSTER_NAME}",Value=owned \
     Key="kubernetes.io/role/internal-elb",Value=1
-done
-
-# Public subnets (ALB) — must be in 2 different AZs
-for SUBNET_ID in <public_subnet_1> <public_subnet_2>; do
-  aws ec2 create-tags --resources $SUBNET_ID --region $REGION --tags \
-    Key="kubernetes.io/cluster/${CLUSTER_NAME}",Value=owned \
-    Key="kubernetes.io/role/elb",Value=1
 done
 ```
 
@@ -160,7 +152,7 @@ aws cloudformation create-stack \
   --stack-name promethium-install-role-<company_name> \
   --template-body file://AWS/CFT/install_role.yaml \
   --parameters \
-    ParameterKey=PromethiumInstallRole,ParameterValue=PromethiumDeploymentRole-<company_name> \
+    ParameterKey=PromethiumInstallRole,ParameterValue=PromethiumDeploymentRole \
   --capabilities CAPABILITY_NAMED_IAM \
   --region <aws_region>
 ```
@@ -188,26 +180,28 @@ aws ec2 associate-iam-instance-profile \
   --region <aws_region>
 ```
 
-### Stack 2 — Base EKS IAM Roles
+### Stack 2 — Operational Roles
 
-Creates the two base EKS IAM roles: the EKS cluster role and the worker node role. Promethium's Terraform will create all OIDC/IRSA service roles automatically after the cluster is up.
+Creates all 8 operational IAM roles: EKS cluster role, worker node role, and 6 OIDC/IRSA service roles.
 
 ```bash
 aws cloudformation create-stack \
-  --stack-name promethium-eks-base-roles-<company_name> \
-  --template-body file://AWS/cloudformation/promethium-eks-roles.yaml \
+  --stack-name promethium-operational-roles-<company_name> \
+  --template-body file://AWS/CFT/operational_roles.yaml \
   --parameters \
-    ParameterKey=EnvironmentName,ParameterValue=<company_name> \
-    ParameterKey=AWSRegion,ParameterValue=<aws_region> \
+    ParameterKey=ClusterName,ParameterValue=promethium-datafabric-prod-<company_name>-eks-cluster \
+    ParameterKey=OIDCProviderUrl,ParameterValue=oidc.eks.<aws_region>.amazonaws.com/id/DUMMY1234567890 \
   --capabilities CAPABILITY_NAMED_IAM \
   --region <aws_region>
 ```
+
+> ℹ️ The `OIDCProviderUrl` is initially set to a dummy value and is automatically updated by Terraform after the EKS cluster is created in Phase 1a.
 
 Wait for completion and record the outputs:
 
 ```bash
 aws cloudformation describe-stacks \
-  --stack-name promethium-eks-base-roles-<company_name> \
+  --stack-name promethium-operational-roles-<company_name> \
   --query "Stacks[0].Outputs" \
   --region <aws_region>
 ```
@@ -215,8 +209,13 @@ aws cloudformation describe-stacks \
 | Output Key | Description | Used In |
 |---|---|---|
 | `EKSClusterRoleArn` | ARN of the EKS cluster IAM role | `cluster_role_arn` in tfvars |
-| `EKSWorkerRoleArn` | ARN of the EKS worker node IAM role | `worker_role_arn` in tfvars |
-| `EKSWorkerInstanceProfileName` | Worker node instance profile name | `jumpbox_instance_profile_name` in tfvars (for node groups) |
+| `EKSWorkerNodeRoleArn` | ARN of the EKS worker node IAM role | `worker_role_arn` in tfvars |
+| `EBSCSIDriverRoleArn` | ARN of the EBS CSI driver role | `aws_ebs_driver_role_arn` in tfvars |
+| `EFSCSIDriverRoleArn` | ARN of the EFS CSI driver role | `aws_efs_driver_role_arn` in tfvars |
+| `LoadBalancerControllerRoleArn` | ARN of the LB controller role | `aws_lb_controller_role_arn` in tfvars |
+| `ClusterAutoscalerRoleArn` | ARN of the cluster autoscaler role | `aws_eks_autoscaler_role_arn` in tfvars |
+| `PGBackupServiceRoleArn` | ARN of the PG backup role | `pg_backup_cronjob_oidc_role_arn` in tfvars |
+| `GlueTrinoServiceRoleArn` | ARN of the Glue/Trino role | `trino_oidc_role_arn` in tfvars |
 
 ---
 
@@ -228,7 +227,7 @@ Promethium's two internal accounts need to trust the customer's deployment role 
 - The S3 Terraform state backend can be accessed (account `734236616923`)
 - The DynamoDB tenant lookup can run (account `308611924187`)
 
-Add `PromethiumDeploymentRole-<company_name>` to the trust policy of `promethium-terraform-saas-assume-role` in **both** accounts:
+Add `PromethiumDeploymentRole` to the trust policy of `promethium-terraform-saas-assume-role` in **both** accounts:
 
 ```bash
 # Account 734236616923 (S3 state backend)
@@ -237,7 +236,7 @@ aws iam update-assume-role-policy \
   --policy-document "$(aws iam get-role \
     --role-name promethium-terraform-saas-assume-role \
     --query 'Role.AssumeRolePolicyDocument' \
-    --output json | jq '.Statement += [{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::<customer_account_id>:role/PromethiumDeploymentRole-<company_name>"},"Action":"sts:AssumeRole","Condition":{"StringEquals":{"sts:ExternalId":"iac-terraform"}}}]')" \
+    --output json | jq '.Statement += [{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::<customer_account_id>:role/PromethiumDeploymentRole"},"Action":"sts:AssumeRole","Condition":{"StringEquals":{"sts:ExternalId":"iac-terraform"}}}]')" \
   --profile <734236616923-profile>
 
 # Account 308611924187 (DynamoDB tenant lookup)
@@ -246,7 +245,7 @@ aws iam update-assume-role-policy \
   --policy-document "$(aws iam get-role \
     --role-name promethium-terraform-saas-assume-role \
     --query 'Role.AssumeRolePolicyDocument' \
-    --output json | jq '.Statement += [{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::<customer_account_id>:role/PromethiumDeploymentRole-<company_name>"},"Action":"sts:AssumeRole","Condition":{"StringEquals":{"sts:ExternalId":"iac-terraform"}}}]')" \
+    --output json | jq '.Statement += [{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::<customer_account_id>:role/PromethiumDeploymentRole"},"Action":"sts:AssumeRole","Condition":{"StringEquals":{"sts:ExternalId":"iac-terraform"}}}]')" \
   --profile <308611924187-profile>
 ```
 
@@ -271,7 +270,7 @@ cd AWS && ./utilities/install_tools.sh
 
 ## ⚙️ 8. Configure Terraform
 
-### 7.1 Clone the deployment repo
+### 8.1 Clone the deployment repo
 
 ```bash
 git clone https://github.com/promethium-ai/promethium-internal-ie-aws.git
@@ -279,19 +278,25 @@ cd promethium-internal-ie-aws
 git checkout <release_branch>   # provided by Promethium
 ```
 
-### 7.2 Configure `backend.tf`
+### 8.2 Configure `backend.tf`
 
 ```hcl
 terraform {
   backend "s3" {
-    bucket  = "pm61-iac-terraform-state"
-    key     = "<env>/<company_name>/terraform.tfstate"
-    region  = "us-east-1"
+    bucket       = "pm61-iac-terraform-state"
+    key          = "<env>/<company_name>/terraform.tfstate"
+    region       = "us-east-1"
+    use_lockfile = "false"
+    assume_role = {
+      role_arn = "arn:aws:iam::734236616923:role/promethium-terraform-saas-assume-role"
+    }
   }
 }
 ```
 
-### 7.3 Create `terraform.tfvars`
+> **Note:** `use_lockfile` requires Terraform ≥ 1.10. If you are running an older version, remove that line. The `assume_role` block allows Terraform to access Promethium's S3 state backend — this is pre-configured by Promethium.
+
+### 8.3 Create `terraform.tfvars`
 
 Replace all `<placeholder>` values before proceeding:
 
@@ -309,8 +314,8 @@ vpc_enabled = false
 
 vpc_info = {
   vpc_id         = "<vpc_id>"
-  # Private subnets only — do NOT include public subnets here
-  subnet_ids     = ["<private_subnet_1>", "<private_subnet_2>"]
+  # Private subnets only — minimum 3 across 3 AZs; do NOT include public subnets here
+  subnet_ids     = ["<private_subnet_1>", "<private_subnet_2>", "<private_subnet_3>"]
   vpc_cidr_block = "<vpc_cidr>"   # e.g. 10.0.0.0/22
 }
 
@@ -486,12 +491,11 @@ Create CNAME records pointing your Promethium subdomains to the ALB DNS name:
 
 | Symptom | Likely cause | Action |
 |---|---|---|
-| `subnets count less than minimal required count: 1 < 2` in LB controller logs | Only 1 public subnet tagged `kubernetes.io/role/elb` | Add a second public subnet in a different AZ and tag it; restart `aws-load-balancer-controller` deployment |
-| `unable to resolve at least one subnet (0 match VPC and tags: [kubernetes.io/role/elb])` | Public subnets missing `kubernetes.io/role/elb=1` tag | Tag both public subnets per Section 4 |
-| EKS node group fails: `instances do not support public IP assignment` | Public subnet included in `subnet_ids` | Remove public subnets from `vpc_info.subnet_ids`; private subnets only |
-| `aws_eks_cluster` fails: `InvalidParameterException` on cluster role | `cluster_role_arn` missing `sts:AssumeRole` trust for `eks.amazonaws.com` | Verify trust policy on the EKS cluster role from Stack 2 |
+| `unable to resolve at least one subnet` in LB controller logs | Private subnets missing `kubernetes.io/role/internal-elb=1` tag | Tag all private subnets per Section 4 |
+| EKS node group fails: `instances do not support public IP assignment` | Public subnet accidentally included in `subnet_ids` | Remove from `vpc_info.subnet_ids` — use private subnets only |
+| `aws_eks_cluster` fails: `InvalidParameterException` on cluster role | `cluster_role_arn` missing `sts:AssumeRole` trust for `eks.amazonaws.com` | Verify trust policy on the EKS cluster role from operational_roles stack |
 | `AccessDenied` creating OIDC provider | Install role missing `iam:CreateOpenIDConnectProvider` | Redeploy `install_role.yaml` — latest version includes OIDC provider management |
-| Node group fails to launch | Worker role ARN wrong or worker role missing required policies | Confirm `EKSWorkerRoleArn` from Stack 2 is correct; verify `AmazonEKSWorkerNodePolicy`, `AmazonEKS_CNI_Policy`, and `AmazonEC2ContainerRegistryReadOnly` are attached |
+| Node group fails to launch | Worker role ARN wrong or worker role missing required policies | Confirm `EKSWorkerRoleArn` from operational_roles stack is correct; verify `AmazonEKSWorkerNodePolicy`, `AmazonEKS_CNI_Policy`, and `AmazonEC2ContainerRegistryReadOnly` are attached |
 | IRSA trust policy mismatch | OIDC URL not matching cluster | Run `terraform output` to compare OIDC URLs; re-apply if needed |
 | ALB not provisioning | LB controller IRSA role misconfigured | Check `aws-load-balancer-controller` pod logs in `kube-system`; verify service account annotation |
 | Ingress hostname empty after Phase 3 | ALB not yet provisioned | Wait 3–5 min and re-run `terraform apply` |
