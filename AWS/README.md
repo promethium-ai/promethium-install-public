@@ -105,17 +105,6 @@ Only private subnets are required. No public subnets are needed.
 
 ## 1. IAM Install Roles
 
-TODO: this needs to be added to trust policy, via the CFT:
-```json
-		{
-            "Effect": "Allow",
-            "Principal": {
-                "AWS": "arn:aws:iam::646322277713:role/PromethiumDeploymentRole-<company-name>"
-            },
-            "Action": "sts:AssumeRole"
-        }
-```
-
 
 Deploy [`CFT/install_role.yaml`](CFT/install_role.yaml). This creates:
 
@@ -136,6 +125,20 @@ aws cloudformation create-stack \
   --capabilities CAPABILITY_NAMED_IAM \
   --region <aws_region>
 ```
+
+Then run the following command in your AWS-authenticated terminal to allow the role to assume itself (allowing terraform on EC2 to chain credential sessions):
+```bash
+STACK_NAME="promethium-install-role-<company_name>"
+ROLE_ARN=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query 'Stacks[0].Outputs[?OutputKey==`RoleArn`].OutputValue' --output text)
+ROLE_NAME="${ROLE_ARN##*/}"
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+CURRENT_POLICY=$(aws iam get-role --role-name "$ROLE_NAME" --query 'Role.AssumeRolePolicyDocument' --output json)
+
+NEW_POLICY=$(echo "$CURRENT_POLICY" | jq --arg arn "$ROLE_ARN" '.Statement += [{"Effect":"Allow","Principal":{"AWS":$arn},"Action":"sts:AssumeRole"}]')
+
+aws iam update-assume-role-policy --role-name "$ROLE_NAME" --policy-document "$NEW_POLICY"
+```
+
 
 Wait for completion and record the outputs:
 
