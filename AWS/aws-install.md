@@ -39,23 +39,21 @@ Your VPC must be at least a `/22` CIDR (e.g., `10.0.0.0/22`). Promethium uses an
 
 > ℹ️ **Public subnets must not have kubernetes tags.** If your VPC has public subnets, ensure they have no `kubernetes.io/*` tags to avoid unintended ALB subnet discovery.
 
-### Example layout for a `10.0.0.0/22` VPC (recommended — 4 private subnets)
+### Example layout for a `10.0.0.0/22` VPC (recommended — 3 private subnets + 1 public)
 
 | Subnet | CIDR | AZ | Type | Purpose |
 |---|---|---|---|---|
 | subnet-1 | `10.0.0.0/24` | `us-east-1a` | Private | EKS worker nodes + internal ALB |
 | subnet-2 | `10.0.1.0/24` | `us-east-1b` | Private | EKS worker nodes + internal ALB |
-| subnet-3 | `10.0.2.0/24` | `us-east-1a` | Private | EKS worker nodes + internal ALB |
-| subnet-4 | `10.0.3.0/24` | `us-east-1b` | Private | EKS worker nodes + internal ALB |
+| subnet-3 | `10.0.2.0/24` | `us-east-1c` | Private | EKS worker nodes + internal ALB |
+| subnet-4 | `10.0.3.0/24` | `us-east-1a` | Public | NAT Gateway |
 
 ### Required subnet tags
 
-All 4 subnets must be tagged with the EKS cluster name **before** running Terraform:
+All 3 private subnets must be tagged with the EKS cluster name **before** running Terraform:
 
 | Subnet type | Tag Key | Tag Value |
 |---|---|---|
-| Public | `kubernetes.io/role/elb` | `1` |
-| Public | `kubernetes.io/cluster/<cluster_name>` | `owned` |
 | Private | `kubernetes.io/role/internal-elb` | `1` |
 | Private | `kubernetes.io/cluster/<cluster_name>` | `owned` |
 

@@ -59,13 +59,7 @@ for subnet_id in $SUBNET_IDS; do
 
   # Check if one of the routes is an Internet Gateway
   if echo "$ROUTES" | grep -q "igw-"; then
-    echo "Subnet $subnet_id is PUBLIC (IGW route). Tagging with kubernetes.io/role/elb..."
-    aws ec2 create-tags \
-      --region "$REGION" \
-      --resources "$subnet_id" \
-      --tags \
-        Key=kubernetes.io/cluster/${CLUSTER_NAME},Value=owned \
-        Key=kubernetes.io/role/elb,Value=1
+    echo "Subnet $subnet_id is PUBLIC (IGW route). Skipping — public subnets should not have kubernetes tags."
   else
     echo "Subnet $subnet_id is PRIVATE (NAT route). Tagging with kubernetes.io/role/internal-elb..."
     aws ec2 create-tags \

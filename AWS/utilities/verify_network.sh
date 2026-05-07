@@ -158,20 +158,21 @@ for S in "${PRIVATE_SUBNETS[@]}"; do echo "       $S"; done
 echo "     Public subnets found:  ${#PUBLIC_SUBNETS[@]}"
 for S in "${PUBLIC_SUBNETS[@]}"; do echo "       $S"; done
 
-[ "${#PRIVATE_SUBNETS[@]}" -ge 2 ] \
-  && check_pass "At least 2 private subnets exist" \
-  || check_fail "Private subnets" "Only ${#PRIVATE_SUBNETS[@]} found — need at least 2 in different AZs for EKS"
+[ "${#PRIVATE_SUBNETS[@]}" -ge 3 ] \
+  && check_pass "At least 3 private subnets exist" \
+  || check_fail "Private subnets" "Only ${#PRIVATE_SUBNETS[@]} found — need at least 3 in different AZs for EKS"
 
-[ "${#PUBLIC_SUBNETS[@]}" -ge 2 ] \
-  && check_pass "At least 2 public subnets exist (for ALB)" \
-  || check_warn "Public subnets" "Only ${#PUBLIC_SUBNETS[@]} found — ALB requires 2 subnets in different AZs"
+# TODO: public subnets are not strictly required — customers may provide their own connectivity (VPN, Direct Connect, etc.)
+[ "${#PUBLIC_SUBNETS[@]}" -ge 1 ] \
+  && check_pass "At least 1 public subnet exists (for NAT Gateway)" \
+  || check_warn "Public subnets" "No public subnets found — NAT Gateway requires a public subnet for EKS node outbound access"
 
 # Check private subnets are in different AZs
-if [ "${#PRIVATE_AZS[@]}" -ge 2 ]; then
+if [ "${#PRIVATE_AZS[@]}" -ge 3 ]; then
   UNIQUE_AZS=$(printf '%s\n' "${PRIVATE_AZS[@]}" | sort -u | wc -l)
-  [ "$UNIQUE_AZS" -ge 2 ] \
-    && check_pass "Private subnets span multiple availability zones" \
-    || check_fail "Private subnet AZs" "Both private subnets are in the same AZ — EKS requires subnets in different AZs"
+  [ "$UNIQUE_AZS" -ge 3 ] \
+    && check_pass "Private subnets span 3 availability zones" \
+    || check_fail "Private subnet AZs" "${UNIQUE_AZS} unique AZs found — EKS requires private subnets in 3 different AZs"
 fi
 
 # ── 3. Subnet tags ────────────────────────────────────────────────────────────
@@ -229,7 +230,7 @@ while IFS=$'\t' read -r SUBNET_ID CIDR AZ PUBLIC_IP; do
     check_subnet_tags "$SUBNET_ID" "internal-elb" "Private subnet ${PRIVATE_IDX}"
     PRIVATE_IDX=$((PRIVATE_IDX+1))
   else
-    check_subnet_tags "$SUBNET_ID" "elb" "Public subnet"
+    : # Public subnets should not have kubernetes tags — skip
   fi
 done <<< "$ALL_SUBNETS"
 
@@ -255,7 +256,7 @@ IGW=$(aws ec2 describe-internet-gateways \
 
 [ -n "$IGW" ] && [ "$IGW" != "None" ] \
   && check_pass "Internet Gateway attached: ${IGW}" \
-  || check_fail "Internet Gateway" "No Internet Gateway attached — ALB and public subnets will not work"
+  || check_fail "Internet Gateway" "No Internet Gateway attached — NAT Gateway will not function and EKS nodes will have no outbound internet access"
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
