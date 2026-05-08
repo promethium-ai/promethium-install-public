@@ -95,25 +95,22 @@ aws iam update-assume-role-policy \
 
 ---
 
-## 7. Tool Installation
-
-SSH or SSM into the install VM, then run:
-
-TODO: Doesn't Promethium associate need keys/auth to SSH/SSM into the install VM/jumpbox?
+## 2. Tool Installation
 
 TODO: how to login without interactive username/password
 
-```
-sudo su
-```
+SSH or SSM into the install VM, then run:
 
 ```bash
-# cd $HOME
+sudo su
+cd
 curl -O https://raw.githubusercontent.com/promethium-ai/promethium-install-public/main/AWS/utilities/install_tools.sh
 bash install_tools.sh
 ```
 
 Or use the install script provided in this repo:
+
+TODO: need to git clone the repo before doing this
 
 ```bash
 cd AWS && ./utilities/install_tools.sh
@@ -121,40 +118,42 @@ cd AWS && ./utilities/install_tools.sh
 
 ---
 
-## 8. Configure Terraform
+## 3. Configure Terraform
 
-### 7.1 Clone the deployment repo
+### 3.1 Clone the deployment repo
 
 From the Install VM/jumpbox, do:
 
 TODO: how to login without interactive username/password
+TODO: if we are going to do everything in VM, then the internal-ie-aws branch name needs to be created there also
 
-TODO
 ```bash
-git clone -b <company_name> --single-branch https://github.com/promethium-ai/promethium-internal-ie-aws.git
+# git clone -b <company_name> --single-branch https://github.com/promethium-ai/promethium-internal-ie-aws.git
 ```
 
 ```bash
 git clone https://github.com/promethium-ai/promethium-internal-ie-aws.git
 cd promethium-internal-ie-aws
-git checkout <release_branch>   # provided by Promethium
+git checkout -b <release_branch>   # provided by Promethium (company name)
 ```
 
 TODO: there are no regular release tags for promethium-internal-ie-aws, I am doing this from main branch.
 
-### 7.2 Configure `backend.tf`
+### 3.2 Configure `backend.tf`
+
+> Remember, `<env>` is `prod`
 
 ```hcl
 terraform {
   backend "s3" {
     bucket  = "pm61-iac-terraform-state"
-    key     = "prod/<company_name>/terraform.tfstate"
+    key     = "<env>/<company_name>/terraform.tfstate"
     region  = "us-east-1"
   }
 }
 ```
 
-### 7.3 Create `terraform.tfvars`
+### 3.3 Create `terraform.tfvars`
 
 Replace all `<placeholder>` values before proceeding:
 
@@ -223,7 +222,7 @@ TODO add isntructions for dev2 IAC
 TODO: Why are there no instructions to change main.tf IAC ref from dev2 to release tag e.g. `24.2.2`?
 ---
 
-## 9. Deployment
+## 4. Deployment
 
 TODO: describe all in jumpbox
 
@@ -250,17 +249,8 @@ export GHCR_TOKEN="<ghcr_token>"
 ### Login to Helm OCI registry
 
 ```bash
+export HELM_EXPERIMENTAL_OCI=1
 helm registry login ghcr.io -u promethium-ai --password-stdin <<< "$GHCR_TOKEN"
-```
-
-TODO: remove below
-```bash
-[root@ip-10-0-0-225 promethium-internal-ie-aws]# helm registry login ghcr.io -u promethium-ai --password-stdin <<< "$GHCR_TOKEN"
-Error: this feature has been marked as experimental and is not enabled by default. Please set HELM_EXPERIMENTAL_OCI=1 in your environment to use this feature
-[root@ip-10-0-0-225 promethium-internal-ie-aws]# export HELM_EXPERIMENTAL_OCI=1
-[root@ip-10-0-0-225 promethium-internal-ie-aws]# helm registry login ghcr.io -u promethium-ai --password-stdin <<< "$GHCR_TOKEN"
-Login Succeeded
-[root@ip-10-0-0-225 promethium-internal-ie-aws]#
 ```
 
 #### Phase 1a — Create EKS cluster
@@ -329,7 +319,7 @@ terraform apply
 
 ---
 
-## 10. Post-Install Verification
+## 5. Post-Install Verification
 
 ### Get cluster credentials
 
@@ -383,7 +373,7 @@ Create CNAME records pointing your Promethium subdomains to the ALB DNS name:
 
 ---
 
-## 11. Troubleshooting
+## 6. Troubleshooting
 
 | Symptom | Likely cause | Action |
 |---|---|---|
@@ -400,7 +390,7 @@ Create CNAME records pointing your Promethium subdomains to the ALB DNS name:
 
 ---
 
-## 6. Teardown
+## 7. Teardown
 
 ```bash
 terraform destroy \
