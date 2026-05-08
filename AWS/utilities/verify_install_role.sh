@@ -52,17 +52,19 @@ else
 fi
 
 # ── 3. Trust policy ───────────────────────────────────────────────────────────
-echo ""
-echo "── 3. Trust policy"
-TRUST=$(echo "$ROLE_JSON" | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin)['Role']['AssumeRolePolicyDocument']))")
+# NOTE: commented out for now since trust policy is updated by promethium associate, it won't be there when the customer finishes their steps
 
-echo "$TRUST" | grep -q "ec2.amazonaws.com" \
-  && check_pass "Trusts ec2.amazonaws.com (required for instance profile)" \
-  || check_fail "Trusts ec2.amazonaws.com" "MISSING — instance profile won't work"
-
-echo "$TRUST" | grep -q "$ROLE_NAME" \
-  && check_pass "Self-trust present (role can assume itself)" \
-  || check_fail "Self-trust" "MISSING — terraform init will fail; must add before deploy"
+# echo ""
+# echo "── 3. Trust policy"
+# TRUST=$(echo "$ROLE_JSON" | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin)['Role']['AssumeRolePolicyDocument']))")
+# 
+# echo "$TRUST" | grep -q "ec2.amazonaws.com" \
+#   && check_pass "Trusts ec2.amazonaws.com (required for instance profile)" \
+#   || check_fail "Trusts ec2.amazonaws.com" "MISSING — instance profile won't work"
+# 
+# echo "$TRUST" | grep -q "$ROLE_NAME" \
+#   && check_pass "Self-trust present (role can assume itself)" \
+#   || check_fail "Self-trust" "MISSING — terraform init will fail; must add before deploy"
 
 # ── 4. Inline policies ────────────────────────────────────────────────────────
 echo ""
