@@ -27,8 +27,8 @@ This page documents instructions for the customer on how to setup prerequisites 
   - [4. Operational Roles](#4-operational-roles)
       - [4.a Option A — New cluster (default name format)](#4a-option-a--new-cluster-default-name-format)
       - [4.b Option B — Pre-existing cluster (custom name override)](#4b-option-b--pre-existing-cluster-custom-name-override)
-  - [7. Operational Roles](#7-operational-roles)
-  - [8. Customer Information Required by Promethium](#8-customer-information-required-by-promethium)
+  - [5. Operational Roles](#5-operational-roles)
+  - [6. Customer Information Required by Promethium](#6-customer-information-required-by-promethium)
     - [AWS Environment](#aws-environment)
     - [VPC and Subnets](#vpc-and-subnets)
     - [Install VM](#install-vm)
@@ -62,7 +62,7 @@ Once the customer has provided the prerequisite infrastructure and variables, th
 | VPC | An existing VPC of at least `/22` CIDR |
 | Private Subnets | Minimum 3 private subnets across 3 availability zones (recommended: 4) — for EKS worker nodes and internal ALB |
 | Outbound Internet Access | The install VM and EKS nodes require outbound HTTPS access via NAT Gateway |
-| Company Name | A `<company_name>` variable used throughout the deployment — max 15 characters, lowercase, no spaces |
+| Company Name | A `${COMPANY_NAME}` variable used throughout the deployment — max 15 characters, lowercase, no spaces |
 | GitHub PAT | A GitHub Personal Access Token with `read:packages` scope (provided by Promethium) |
 | Promethium Image Tag | Application release version (e.g., `24.2.2`) — provided by Promethium |
 
@@ -105,6 +105,12 @@ Only private subnets are required. No public subnets are needed.
 
 # Setup Customer Prerequisites
 
+TODO: assumes linux
+```bash
+export COMPANY_NAME="..."
+export AWS_REGION="..."
+```
+
 ## 1. IAM Install Roles
 
 
@@ -119,12 +125,12 @@ Deploy [`CFT/install_role.yaml`](CFT/install_role.yaml). This creates:
 Create the IAM role and EC2 instance profile that Terraform uses to provision infrastructure.
 
 ```bash
-aws cloudformation create-stack --stack-name promethium-install-role-<company_name> --template-body file://AWS/CFT/install_role.yaml --parameters ParameterKey=PromethiumInstallRole,ParameterValue=PromethiumDeploymentRole-<company_name> --capabilities CAPABILITY_NAMED_IAM --region <aws_region>
+aws cloudformation create-stack --stack-name promethium-install-role-${COMPANY_NAME} --template-body file://AWS/CFT/install_role.yaml --parameters ParameterKey=PromethiumInstallRole,ParameterValue=PromethiumDeploymentRole-${COMPANY_NAME} --capabilities CAPABILITY_NAMED_IAM --region ${AWS_REGION}
 ```
 
 Then run the following command in your AWS-authenticated terminal to allow the role to assume itself (allowing terraform on EC2 to chain credential sessions):
 ```bash
-STACK_NAME="promethium-install-role-<company_name>"
+STACK_NAME="promethium-install-role-${COMPANY_NAME}"
 ROLE_ARN=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query 'Stacks[0].Outputs[?OutputKey==`RoleArn`].OutputValue' --output text)
 ROLE_NAME="${ROLE_ARN##*/}"
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
@@ -139,7 +145,7 @@ aws iam update-assume-role-policy --role-name "$ROLE_NAME" --policy-document "$N
 Wait for completion and record the outputs:
 
 ```bash
-aws cloudformation describe-stacks --stack-name promethium-install-role-<company_name> --query "Stacks[0].Outputs" --region <aws_region>
+aws cloudformation describe-stacks --stack-name promethium-install-role-${COMPANY_NAME} --query "Stacks[0].Outputs" --region ${AWS_REGION}
 ```
 
 | Output Key | Description | Used In |
@@ -172,15 +178,15 @@ The template is located at [`AWS/CFT/network.yaml`](CFT/network.yaml) in this re
 #### Deploy the network stack
 
 ```bash
-aws cloudformation create-stack --stack-name pmie-network-<company_name> --template-body file://AWS/CFT/network.yaml --parameters ParameterKey=VpcName,ParameterValue=<company_name>-vpc ParameterKey=VpcCidrBlock,ParameterValue=10.0.0.0/22 ParameterKey=EksClusterName,ParameterValue=promethium-datafabric-prod-<company_name>-eks-cluster --region <aws_region>
+aws cloudformation create-stack --stack-name pmie-network-${COMPANY_NAME} --template-body file://AWS/CFT/network.yaml --parameters ParameterKey=VpcName,ParameterValue=${COMPANY_NAME}-vpc ParameterKey=VpcCidrBlock,ParameterValue=10.0.0.0/22 ParameterKey=EksClusterName,ParameterValue=promethium-datafabric-prod-${COMPANY_NAME}-eks-cluster --region ${AWS_REGION}
 ```
 
-> If you are using your own EKS Cluster, you can replace the `ParameterValue` for `ParameterKey=EksClusterName,ParameterValue=promethium-datafabric-prod-<company_name>-eks-cluster`
+> If you are using your own EKS Cluster, you can replace the `ParameterValue` for `ParameterKey=EksClusterName,ParameterValue=promethium-datafabric-prod-${COMPANY_NAME}-eks-cluster`
 
 Wait for completion and note the outputs:
 
 ```bash
-aws cloudformation describe-stacks --stack-name pmie-network-<company_name> --query "Stacks[0].Outputs" --region <aws_region>
+aws cloudformation describe-stacks --stack-name pmie-network-${COMPANY_NAME} --query "Stacks[0].Outputs" --region ${AWS_REGION}
 ```
 
 **Outputs to record:**
@@ -201,20 +207,18 @@ If you are bringing your own VPC, apply the required EKS tags using the tagging 
 
 ```bash
 cd AWS
-./utilities/tag_subnets.sh <vpc_id> <aws_region> <company_name>
+./utilities/tag_subnets.sh <vpc_id> ${AWS_REGION} ${COMPANY_NAME}
 ```
 
 Or apply them manually:
 
 ```bash
-CLUSTER_NAME="promethium-datafabric-<env>-<company_name>-eks-cluster"
-REGION="<aws_region>"
+CLUSTER_NAME="promethium-datafabric-prod-${COMPANY_NAME}-eks-cluster"
+REGION="${AWS_REGION}"
 
 # Private subnets (EKS nodes)
 for SUBNET_ID in <private_subnet_1> <private_subnet_2>; do
-  aws ec2 create-tags --resources $SUBNET_ID --region $REGION --tags \
-    Key="kubernetes.io/cluster/${CLUSTER_NAME}",Value=owned \
-    Key="kubernetes.io/role/internal-elb",Value=1
+  aws ec2 create-tags --resources $SUBNET_ID --region $REGION --tags Key="kubernetes.io/cluster/${CLUSTER_NAME}",Value=owned Key="kubernetes.io/role/internal-elb",Value=1
 done
 
 # Public subnets (ALB) — must be in 2 different AZs
@@ -238,13 +242,13 @@ The template is located at [`AWS/CFT/jumpbox.yaml`](CFT/jumpbox.yaml).
 
 | Parameter | Value | Source |
 |---|---|---|
-| `VpcId` | VPC ID | `pmie-network-<company_name>` output `VpcId`, or your existing VPC ID |
-| `PrivateSubnet1Id` | Private Subnet 1 ID (AZ-a) | `pmie-network-<company_name>` output `Subnet1Id`, or your existing private subnet ID |
+| `VpcId` | VPC ID | `pmie-network-${COMPANY_NAME}` output `VpcId`, or your existing VPC ID |
+| `PrivateSubnet1Id` | Private Subnet 1 ID (AZ-a) | `pmie-network-${COMPANY_NAME}` output `Subnet1Id`, or your existing private subnet ID |
 
 #### Deploy the jumpbox stack
 
 ```bash
-aws cloudformation create-stack --stack-name pmie-jumpbox-<company_name> --template-body file://AWS/CFT/jumpbox.yaml --parameters ParameterKey=VpcId,ParameterValue=<vpc_id> ParameterKey=PrivateSubnet1Id,ParameterValue=<private_subnet_1_id> ParameterKey=JumpboxName,ParameterValue=<company_name>-jumpbox ParameterKey=UseExistingInstanceProfile,ParameterValue=PromethiumDeploymentRole-<company_name>InstanceProfile --region <aws_region>
+aws cloudformation create-stack --stack-name pmie-jumpbox-${COMPANY_NAME} --template-body file://AWS/CFT/jumpbox.yaml --parameters ParameterKey=VpcId,ParameterValue=<vpc_id> ParameterKey=PrivateSubnet1Id,ParameterValue=<private_subnet_1_id> ParameterKey=JumpboxName,ParameterValue=${COMPANY_NAME}-jumpbox ParameterKey=UseExistingInstanceProfile,ParameterValue=PromethiumDeploymentRole-${COMPANY_NAME}InstanceProfile --region ${AWS_REGION}
 ```
 
 > ℹ️ Deploy the install role (Section 3) **before** this stack to attach the instance profile automatically via `UseExistingInstanceProfile`.
@@ -252,7 +256,7 @@ aws cloudformation create-stack --stack-name pmie-jumpbox-<company_name> --templ
 Wait for completion and record the outputs:
 
 ```bash
-aws cloudformation describe-stacks --stack-name pmie-jumpbox-<company_name> --query "Stacks[0].Outputs" --region <aws_region>
+aws cloudformation describe-stacks --stack-name pmie-jumpbox-${COMPANY_NAME} --query "Stacks[0].Outputs" --region ${AWS_REGION}
 ```
 
 **Outputs to record:**
@@ -265,7 +269,7 @@ aws cloudformation describe-stacks --stack-name pmie-jumpbox-<company_name> --qu
 ### 3.b Option B - Attach the instance profile to your provided install VM
 
 ```bash
-aws ec2 associate-iam-instance-profile --instance-id <install_vm_instance_id> --iam-instance-profile Name=<InstanceProfileName> --region <aws_region>
+aws ec2 associate-iam-instance-profile --instance-id <install_vm_instance_id> --iam-instance-profile Name=<InstanceProfileName> --region ${AWS_REGION}
 ```
 
 ---
@@ -281,16 +285,10 @@ Deploy [`CFT/operational_roles.yaml`](CFT/operational_roles.yaml).
 
 #### 4.a Option A — New cluster (default name format)
 
-Use this when Promethium will create the EKS cluster. The cluster name defaults to `promethium-datafabric-prod-<company_name>-eks-cluster`.
+Use this when Promethium will create the EKS cluster. The cluster name defaults to `promethium-datafabric-prod-${COMPANY_NAME}-eks-cluster`.
 
 ```bash
-aws cloudformation create-stack \
-  --stack-name promethium-eks-base-roles-<company_name> \
-  --template-body file://AWS/CFT/operational_roles.yaml \
-  --parameters \
-    ParameterKey=CompanyName,ParameterValue=<company_name> \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --region <aws_region>
+aws cloudformation create-stack --stack-name promethium-eks-base-roles-${COMPANY_NAME} --template-body file://AWS/CFT/operational_roles.yaml --parameters ParameterKey=CompanyName,ParameterValue=${COMPANY_NAME} --capabilities CAPABILITY_NAMED_IAM --region ${AWS_REGION}
 ```
 
 #### 4.b Option B — Pre-existing cluster (custom name override)
@@ -298,38 +296,28 @@ aws cloudformation create-stack \
 Use this when the customer already has an EKS cluster whose name differs from the default format. Set `CustomClusterName` to the existing cluster's name.
 
 ```bash
-aws cloudformation create-stack \
-  --stack-name promethium-eks-base-roles-<company_name> \
-  --template-body file://AWS/CFT/operational_roles.yaml \
-  --parameters \
-    ParameterKey=CompanyName,ParameterValue=<company_name> \
-    ParameterKey=CustomClusterName,ParameterValue=<existing_cluster_name> \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --region <aws_region>
+aws cloudformation create-stack --stack-name promethium-eks-base-roles-${COMPANY_NAME} --template-body file://AWS/CFT/operational_roles.yaml --parameters ParameterKey=CompanyName,ParameterValue=${COMPANY_NAME} ParameterKey=CustomClusterName,ParameterValue=<existing_cluster_name> --capabilities CAPABILITY_NAMED_IAM --region ${AWS_REGION}
 ```
 ---
 
 Whichever option you chose, wait for completion and record the outputs:
 
 ```bash
-aws cloudformation describe-stacks \
-  --stack-name promethium-eks-base-roles-<company_name> \
-  --query "Stacks[0].Outputs" \
-  --region <aws_region>
+aws cloudformation describe-stacks --stack-name promethium-eks-base-roles-${COMPANY_NAME} --query "Stacks[0].Outputs" --region ${AWS_REGION}
 ```
 
-This creates all 8 operational roles (all names are suffixed with `<company_name>`):
+This creates all 8 operational roles (all names are suffixed with `${COMPANY_NAME}`):
 
 | Role | Used By | Purpose |
 |------|---------|---------|
-| `promethium-prod-eks-cluster-role-<company_name>` | EKS control plane | Gives the EKS control plane permissions to run the cluster, manage AWS infrastructure, and manage pod-level networking |
-| `promethium-prod-eks-worker-role-<company_name>` | EKS worker nodes | Allows nodes to pull container images from ECR, manage EFS volumes via CSI driver, and handle network management within EKS |
-| `promethium-prod-ebs-csi-driver-role-<company_name>` | EBS CSI driver | Allows the EBS CSI driver to provision, attach, delete, and snapshot encrypted EBS volumes using KMS keys |
-| `promethium-prod-efs-csi-driver-role-<company_name>` | EFS CSI driver | Allows the EFS CSI driver to provision and manage EFS file systems and access points |
-| `promethium-prod-lb-controller-role-<company_name>` | Load Balancer Controller | Allows the LB Controller to provision and manage ALBs/NLBs on behalf of Kubernetes ingress and service resources |
-| `promethium-prod-cluster-autoscaler-role-<company_name>` | Cluster Autoscaler | Allows the autoscaler to add or remove worker nodes in Auto Scaling Groups based on cluster demand |
-| `promethium-prod-pg-backup-role-<company_name>` | Postgres backup | Allows postgres backups to be written to S3 and container images to be pulled from ECR |
-| `promethium-prod-glue-trino-role-<company_name>` | Trino / Glue crawlers | Allows Trino to query and manage data in Glue Data Catalog and S3, handle KMS-encrypted data, and interact with Glue jobs |
+| `promethium-prod-eks-cluster-role-${COMPANY_NAME}` | EKS control plane | Gives the EKS control plane permissions to run the cluster, manage AWS infrastructure, and manage pod-level networking |
+| `promethium-prod-eks-worker-role-${COMPANY_NAME}` | EKS worker nodes | Allows nodes to pull container images from ECR, manage EFS volumes via CSI driver, and handle network management within EKS |
+| `promethium-prod-ebs-csi-driver-role-${COMPANY_NAME}` | EBS CSI driver | Allows the EBS CSI driver to provision, attach, delete, and snapshot encrypted EBS volumes using KMS keys |
+| `promethium-prod-efs-csi-driver-role-${COMPANY_NAME}` | EFS CSI driver | Allows the EFS CSI driver to provision and manage EFS file systems and access points |
+| `promethium-prod-lb-controller-role-${COMPANY_NAME}` | Load Balancer Controller | Allows the LB Controller to provision and manage ALBs/NLBs on behalf of Kubernetes ingress and service resources |
+| `promethium-prod-cluster-autoscaler-role-${COMPANY_NAME}` | Cluster Autoscaler | Allows the autoscaler to add or remove worker nodes in Auto Scaling Groups based on cluster demand |
+| `promethium-prod-pg-backup-role-${COMPANY_NAME}` | Postgres backup | Allows postgres backups to be written to S3 and container images to be pulled from ECR |
+| `promethium-prod-glue-trino-role-${COMPANY_NAME}` | Trino / Glue crawlers | Allows Trino to query and manage data in Glue Data Catalog and S3, handle KMS-encrypted data, and interact with Glue jobs |
 
 **Outputs to record:**
 
@@ -347,9 +335,9 @@ This creates all 8 operational roles (all names are suffixed with `<company_name
 ---
 
 
-## 7. Operational Roles
+## 5. Operational Roles
 
-## 8. Customer Information Required by Promethium
+## 6. Customer Information Required by Promethium
 
 ### AWS Environment
 
