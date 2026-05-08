@@ -15,18 +15,18 @@ This page documents instructions for the customer on how to setup prerequisites 
 - [Setup Customer Prerequisites](#setup-customer-prerequisites)
   - [1. IAM Install Roles](#1-iam-install-roles)
   - [2. VPC subnet](#2-vpc-subnet)
-    - [4.a Option A — Create VPC with Promethium Network CFT](#4a-option-a--create-vpc-with-promethium-network-cft)
+    - [2.a Option A — Create VPC with Promethium Network CFT](#2a-option-a--create-vpc-with-promethium-network-cft)
       - [What it creates](#what-it-creates)
       - [Deploy the network stack](#deploy-the-network-stack)
-    - [4.b Option B — Tag Your Existing Subnets](#4b-option-b--tag-your-existing-subnets)
-  - [5. Jumpbox](#5-jumpbox)
-    - [5.a Option A — Create Jumpbox with Promethium Jumpbox CFT](#5a-option-a--create-jumpbox-with-promethium-jumpbox-cft)
+    - [2.b Option B — Tag Your Existing Subnets](#2b-option-b--tag-your-existing-subnets)
+  - [3. Jumpbox](#3-jumpbox)
+    - [3.a Option A — Create Jumpbox with Promethium Jumpbox CFT](#3a-option-a--create-jumpbox-with-promethium-jumpbox-cft)
       - [Required inputs (from previous stack outputs)](#required-inputs-from-previous-stack-outputs)
       - [Deploy the jumpbox stack](#deploy-the-jumpbox-stack)
-    - [5.b Option B - Attach the instance profile to your provided install VM](#5b-option-b---attach-the-instance-profile-to-your-provided-install-vm)
-  - [6. Operational Roles](#6-operational-roles)
-      - [6.a Option A — New cluster (default name format)](#6a-option-a--new-cluster-default-name-format)
-      - [6.b Option B — Pre-existing cluster (custom name override)](#6b-option-b--pre-existing-cluster-custom-name-override)
+    - [3.b Option B - Attach the instance profile to your provided install VM](#3b-option-b---attach-the-instance-profile-to-your-provided-install-vm)
+  - [4. Operational Roles](#4-operational-roles)
+      - [4.a Option A — New cluster (default name format)](#4a-option-a--new-cluster-default-name-format)
+      - [4.b Option B — Pre-existing cluster (custom name override)](#4b-option-b--pre-existing-cluster-custom-name-override)
   - [7. Operational Roles](#7-operational-roles)
   - [8. Customer Information Required by Promethium](#8-customer-information-required-by-promethium)
     - [AWS Environment](#aws-environment)
@@ -119,13 +119,7 @@ Deploy [`CFT/install_role.yaml`](CFT/install_role.yaml). This creates:
 Create the IAM role and EC2 instance profile that Terraform uses to provision infrastructure.
 
 ```bash
-aws cloudformation create-stack \
-  --stack-name promethium-install-role-<company_name> \
-  --template-body file://AWS/CFT/install_role.yaml \
-  --parameters \
-    ParameterKey=PromethiumInstallRole,ParameterValue=PromethiumDeploymentRole-<company_name> \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --region <aws_region>
+aws cloudformation create-stack --stack-name promethium-install-role-<company_name> --template-body file://AWS/CFT/install_role.yaml --parameters ParameterKey=PromethiumInstallRole,ParameterValue=PromethiumDeploymentRole-<company_name> --capabilities CAPABILITY_NAMED_IAM --region <aws_region>
 ```
 
 Then run the following command in your AWS-authenticated terminal to allow the role to assume itself (allowing terraform on EC2 to chain credential sessions):
@@ -145,10 +139,7 @@ aws iam update-assume-role-policy --role-name "$ROLE_NAME" --policy-document "$N
 Wait for completion and record the outputs:
 
 ```bash
-aws cloudformation describe-stacks \
-  --stack-name promethium-install-role-<company_name> \
-  --query "Stacks[0].Outputs" \
-  --region <aws_region>
+aws cloudformation describe-stacks --stack-name promethium-install-role-<company_name> --query "Stacks[0].Outputs" --region <aws_region>
 ```
 
 | Output Key | Description | Used In |
@@ -159,10 +150,10 @@ aws cloudformation describe-stacks \
 
 ## 2. VPC subnet
 
-- If you don't yet have a VPC with subnets, follow `4.a` and skip `4.b`. 
-- If you already have a VPC with subnets, follow `4.b` and skip `4.a`.
+- If you don't yet have a VPC with subnets, follow **2.a** and skip **2.b**. 
+- If you already have a VPC with subnets, follow **2.b** and skip **2.a**.
 
-### 4.a Option A — Create VPC with Promethium Network CFT
+### 2.a Option A — Create VPC with Promethium Network CFT
 
 If you do not have an existing VPC, Promethium provides a CloudFormation template (CFT) that creates all required networking resources.
 
@@ -170,36 +161,26 @@ The template is located at [`AWS/CFT/network.yaml`](CFT/network.yaml) in this re
 
 #### What it creates
 
-TODO: reword this
-
-Internal ALB only (no public subnets needed for ALB) — 3 private + 1 public (for NAT GW) works, but requires customers to access Promethium over VPN/Direct Connect, not the public internet.
-
 - VPC with configurable CIDR
 - 3 private subnets (NAT Gateway routing) — for EKS nodes
 - 1 public subnets (for VPN access)
 - Internet Gateway and NAT Gateway
 - Route tables and associations
 
+> This CFT tags the private subnets so that we only have an internal ALB. The one public subnet (for NAT GW) here allows access over VPN/Direct Connect, not the public internet.
+
 #### Deploy the network stack
 
 ```bash
-aws cloudformation create-stack \
-  --stack-name pmie-network-<company_name> \
-  --template-body file://AWS/CFT/network.yaml \
-  --parameters \
-    ParameterKey=VpcName,ParameterValue=<company_name>-vpc \
-    ParameterKey=VpcCidrBlock,ParameterValue=10.0.0.0/22 \
-    ParameterKey=EksClusterName,ParameterValue=promethium-datafabric-<env>-<company_name>-eks-cluster \
-  --region <aws_region>
+aws cloudformation create-stack --stack-name pmie-network-<company_name> --template-body file://AWS/CFT/network.yaml --parameters ParameterKey=VpcName,ParameterValue=<company_name>-vpc ParameterKey=VpcCidrBlock,ParameterValue=10.0.0.0/22 ParameterKey=EksClusterName,ParameterValue=promethium-datafabric-prod-<company_name>-eks-cluster --region <aws_region>
 ```
+
+> If you are using your own EKS Cluster, you can replace the `ParameterValue` for `ParameterKey=EksClusterName,ParameterValue=promethium-datafabric-prod-<company_name>-eks-cluster`
 
 Wait for completion and note the outputs:
 
 ```bash
-aws cloudformation describe-stacks \
-  --stack-name pmie-network-<company_name> \
-  --query "Stacks[0].Outputs" \
-  --region <aws_region>
+aws cloudformation describe-stacks --stack-name pmie-network-<company_name> --query "Stacks[0].Outputs" --region <aws_region>
 ```
 
 **Outputs to record:**
@@ -214,7 +195,7 @@ aws cloudformation describe-stacks \
 
 ---
 
-### 4.b Option B — Tag Your Existing Subnets
+### 2.b Option B — Tag Your Existing Subnets
 
 If you are bringing your own VPC, apply the required EKS tags using the tagging utility:
 
@@ -244,12 +225,12 @@ done
 # done
 ```
 
-## 5. Jumpbox
+## 3. Jumpbox
 
-- If you don't yet have an install VM, follow `5.a` (skip `5.b`) to create one with the Promethium jumpbox CFT.
-- If you already have an install VM, follow `5.b` (skip `5.a`) to attach the instance profile to it.
+- If you don't yet have an install VM, follow **3.a** (skip **3.b**) to create one with the Promethium jumpbox CFT.
+- If you already have an install VM, follow **3.b** (skip **3.a**) to attach the instance profile to it.
 
-### 5.a Option A — Create Jumpbox with Promethium Jumpbox CFT
+### 3.a Option A — Create Jumpbox with Promethium Jumpbox CFT
 
 The template is located at [`AWS/CFT/jumpbox.yaml`](CFT/jumpbox.yaml).
 
@@ -263,15 +244,7 @@ The template is located at [`AWS/CFT/jumpbox.yaml`](CFT/jumpbox.yaml).
 #### Deploy the jumpbox stack
 
 ```bash
-aws cloudformation create-stack \
-  --stack-name pmie-jumpbox-<company_name> \
-  --template-body file://AWS/CFT/jumpbox.yaml \
-  --parameters \
-    ParameterKey=VpcId,ParameterValue=<vpc_id> \
-    ParameterKey=PrivateSubnet1Id,ParameterValue=<private_subnet_1_id> \
-    ParameterKey=JumpboxName,ParameterValue=<company_name>-jumpbox \
-    ParameterKey=UseExistingInstanceProfile,ParameterValue=PromethiumDeploymentRole-<company_name>InstanceProfile \
-  --region <aws_region>
+aws cloudformation create-stack --stack-name pmie-jumpbox-<company_name> --template-body file://AWS/CFT/jumpbox.yaml --parameters ParameterKey=VpcId,ParameterValue=<vpc_id> ParameterKey=PrivateSubnet1Id,ParameterValue=<private_subnet_1_id> ParameterKey=JumpboxName,ParameterValue=<company_name>-jumpbox ParameterKey=UseExistingInstanceProfile,ParameterValue=PromethiumDeploymentRole-<company_name>InstanceProfile --region <aws_region>
 ```
 
 > ℹ️ Deploy the install role (Section 3) **before** this stack to attach the instance profile automatically via `UseExistingInstanceProfile`.
@@ -279,10 +252,7 @@ aws cloudformation create-stack \
 Wait for completion and record the outputs:
 
 ```bash
-aws cloudformation describe-stacks \
-  --stack-name pmie-jumpbox-<company_name> \
-  --query "Stacks[0].Outputs" \
-  --region <aws_region>
+aws cloudformation describe-stacks --stack-name pmie-jumpbox-<company_name> --query "Stacks[0].Outputs" --region <aws_region>
 ```
 
 **Outputs to record:**
@@ -292,27 +262,24 @@ aws cloudformation describe-stacks \
 | `JumpboxInstanceId` | Install VM instance ID | Reference when connecting via SSM |
 | `JumpboxSecurityGroupId` | Jumpbox security group ID | `jumpbox_sg_id` in tfvars |
 
-### 5.b Option B - Attach the instance profile to your provided install VM
+### 3.b Option B - Attach the instance profile to your provided install VM
 
 ```bash
-aws ec2 associate-iam-instance-profile \
-  --instance-id <install_vm_instance_id> \
-  --iam-instance-profile Name=<InstanceProfileName> \
-  --region <aws_region>
+aws ec2 associate-iam-instance-profile --instance-id <install_vm_instance_id> --iam-instance-profile Name=<InstanceProfileName> --region <aws_region>
 ```
 
 ---
 
-## 6. Operational Roles
+## 4. Operational Roles
 
 Deploy [`CFT/operational_roles.yaml`](CFT/operational_roles.yaml).
 
-- If you don't yet have an EKS cluster, follow `6.a` (skip `6.b`) since we will be using a default cluster name format.
-- If you already have an EKS cluster, follow `6.b` (skip `6.a`) to use your cluster's custom name.
+- If you don't yet have an EKS cluster, follow **4.a** (skip **4.b**) since we will be using a default cluster name format.
+- If you already have an EKS cluster, follow **4.b** (skip **4.a**) to use your cluster's custom name.
 
 > `OIDCProviderUrl` is left as the default dummy value — it is updated after Phase 1a once the EKS cluster and OIDC provider exist.
 
-#### 6.a Option A — New cluster (default name format)
+#### 4.a Option A — New cluster (default name format)
 
 Use this when Promethium will create the EKS cluster. The cluster name defaults to `promethium-datafabric-prod-<company_name>-eks-cluster`.
 
@@ -326,7 +293,7 @@ aws cloudformation create-stack \
   --region <aws_region>
 ```
 
-#### 6.b Option B — Pre-existing cluster (custom name override)
+#### 4.b Option B — Pre-existing cluster (custom name override)
 
 Use this when the customer already has an EKS cluster whose name differs from the default format. Set `CustomClusterName` to the existing cluster's name.
 
