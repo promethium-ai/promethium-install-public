@@ -63,29 +63,7 @@ Where `<cluster_name>` = `promethium-datafabric-prod-<company_name>-eks-cluster`
 
 # Installation
 
-## 1. Verifier Permissions (required before running verifier scripts)
-
-TODO: Where does this section really belong?
-
-Before running the Promethium pre-install verifier scripts from the jumpbox, deploy [`CFT/verifier_policy.yaml`](CFT/verifier_policy.yaml) to add the necessary read-only permissions to the install role:
-
-```bash
-aws cloudformation create-stack \
-  --stack-name promethium-verifier-policy \
-  --template-body file://AWS/CFT/verifier_policy.yaml \
-  --parameters \
-    ParameterKey=PromethiumInstallRole,ParameterValue=PromethiumDeploymentRole \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --region <aws_region>
-```
-
-TODO: run verifier script here?
-
-> This policy grants read-only access to CloudFormation, IAM, and EKS — used only by the verifier scripts. It can be removed after the install is complete.
-
----
-
-## 6. Grant Cross-Account Trust
+## 1. Grant Cross-Account Trust
 
 > ⚠️ **This step is performed by Promethium**, not the customer. It must be completed before Terraform runs.
 

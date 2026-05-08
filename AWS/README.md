@@ -27,7 +27,9 @@ This page documents instructions for the customer on how to setup prerequisites 
   - [4. Operational Roles](#4-operational-roles)
       - [4.a Option A — New cluster (default name format)](#4a-option-a--new-cluster-default-name-format)
       - [4.b Option B — Pre-existing cluster (custom name override)](#4b-option-b--pre-existing-cluster-custom-name-override)
-  - [5. Operational Roles](#5-operational-roles)
+  - [5. Verification](#5-verification)
+      - [5.1 Verifier Permissions (required before running verifier scripts)](#51-verifier-permissions-required-before-running-verifier-scripts)
+      - [5.2 Verifier Script (TODO)](#52-verifier-script-todo)
   - [6. Customer Information Required by Promethium](#6-customer-information-required-by-promethium)
     - [AWS Environment](#aws-environment)
     - [VPC and Subnets](#vpc-and-subnets)
@@ -335,7 +337,33 @@ This creates all 8 operational roles (all names are suffixed with `${COMPANY_NAM
 ---
 
 
-## 5. Operational Roles
+## 5. Verification
+
+#### 5.1 Verifier Permissions (required before running verifier scripts)
+
+TODO: Where does this section really belong?
+
+Before running the Promethium pre-install verifier scripts from the jumpbox, deploy [`CFT/verifier_policy.yaml`](CFT/verifier_policy.yaml) to add the necessary read-only permissions to the install role:
+
+```bash
+aws cloudformation create-stack \
+  --stack-name promethium-verifier-policy \
+  --template-body file://AWS/CFT/verifier_policy.yaml \
+  --parameters \
+    ParameterKey=PromethiumInstallRole,ParameterValue=PromethiumDeploymentRole \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --region <aws_region>
+```
+
+> This policy grants read-only access to CloudFormation, IAM, and EKS — used only by the verifier scripts. It can be removed after the install is complete.
+
+#### 5.2 Verifier Script (TODO)
+
+```bash
+# TODO
+```
+
+---
 
 ## 6. Customer Information Required by Promethium
 
