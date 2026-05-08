@@ -57,7 +57,7 @@ All 3 private subnets must be tagged with the EKS cluster name **before** runnin
 | Private | `kubernetes.io/role/internal-elb` | `1` |
 | Private | `kubernetes.io/cluster/<cluster_name>` | `owned` |
 
-Where `<cluster_name>` = `promethium-datafabric-<env>-<company_name>-eks-cluster` if the customer did not already have a cluster with a custom name.
+Where `<cluster_name>` = `promethium-datafabric-prod-<company_name>-eks-cluster` if the customer did not already have a cluster with a custom name.
 
 ---
 
@@ -170,7 +170,7 @@ TODO: there are no regular release tags for promethium-internal-ie-aws, I am doi
 terraform {
   backend "s3" {
     bucket  = "pm61-iac-terraform-state"
-    key     = "<env>/<company_name>/terraform.tfstate"
+    key     = "prod/<company_name>/terraform.tfstate"
     region  = "us-east-1"
   }
 }
@@ -182,7 +182,7 @@ Replace all `<placeholder>` values before proceeding:
 
 ```hcl
 # ── Core ──────────────────────────────────────────────────────────────────────
-env          = "<env>"            # dev | qa | preview | prod
+env          = "prod"            # dev | qa | preview | prod
 company_name = "<company_name>"   # max 15 chars, lowercase, no spaces
 aws_region   = "<aws_region>"     # e.g. us-east-1
 
@@ -215,7 +215,7 @@ trino_oidc_role_arn             = "<GlueTrinoServiceRoleArn from operational_rol
 
 # ── EKS ───────────────────────────────────────────────────────────────────────
 custom_cluster_name = true
-eks_cluster_name    = "promethium-datafabric-<env>-<company_name>-eks-cluster"
+eks_cluster_name    = "promethium-datafabric-prod-<company_name>-eks-cluster"
 eks_cluster_type    = "private"
 jumpbox_enabled     = false
 loadbalancer_type   = "internal"
@@ -228,7 +228,7 @@ promethium_image_tag = "<image_tag>"   # e.g. 24.2.2
 
 # ── Tagging ───────────────────────────────────────────────────────────────────
 default_tags = {
-  Environment = "<env>"
+  Environment = "prod"
   Product     = "Promethium"
   Owner       = "support@promethium.ai"
   created-by  = "Terraform"
@@ -357,7 +357,7 @@ terraform apply
 
 ```bash
 aws eks update-kubeconfig \
-  --name promethium-datafabric-<env>-<company_name>-eks-cluster \
+  --name promethium-datafabric-prod-<company_name>-eks-cluster \
   --region <aws_region>
 ```
 
