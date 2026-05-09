@@ -2,7 +2,7 @@
 # Pre-install verification: checks operational roles exist and are correctly configured
 # Works whether roles were created via CloudFormation or manually.
 #
-# Usage: ./verify_operational_roles.sh <company_name> <aws_region> [ops_stack_name] [--discover]
+# Usage:
 #
 # - company_name:   used to derive expected cluster name and default role names
 # - aws_region:     AWS region
@@ -202,12 +202,12 @@ else
   # Fallback to default names if stack not used or empty
   if [ ${#OIDC_ROLE_NAMES[@]} -eq 0 ]; then
     OIDC_ROLE_NAMES=(
-      "promethium-prod-ebs-csi-driver-role"
-      "promethium-prod-efs-csi-driver-role"
-      "promethium-prod-lb-controller-role"
-      "promethium-prod-cluster-autoscaler-role"
-      "promethium-prod-pg-backup-role"
-      "promethium-prod-glue-trino-role"
+      "promethium-prod-ebs-csi-driver-role-${COMPANY}"
+      "promethium-prod-efs-csi-driver-role-${COMPANY}"
+      "promethium-prod-lb-controller-role-${COMPANY}"
+      "promethium-prod-cluster-autoscaler-role-${COMPANY}"
+      "promethium-prod-pg-backup-role-${COMPANY}"
+      "promethium-prod-glue-trino-role-${COMPANY}"
     )
   fi
 
@@ -219,14 +219,14 @@ else
       check_fail "OIDC trust policy on ${ROLE}" "Still has DUMMY URL — update operational_roles stack now:
       OIDC_URL=$(aws eks describe-cluster --name ${EXPECTED_CLUSTER} --query 'cluster.identity.oidc.issuer' --output text --region ${REGION} | sed 's|https://||')
       aws cloudformation update-stack --stack-name ${STACK_NAME:-<stack_name>} --use-previous-template \\
-        --parameters ParameterKey=ClusterName,ParameterValue=${EXPECTED_CLUSTER} \\
+        --parameters ParameterKey=CompanyName,ParameterValue=${COMPANY} \\
                      ParameterKey=OIDCProviderUrl,ParameterValue=\$OIDC_URL \\
         --capabilities CAPABILITY_NAMED_IAM --region ${REGION}"
       OIDC_MISMATCH=true
     elif echo "$TRUST" | grep -q "$REAL_OIDC"; then
       check_pass "OIDC trust policy on ${ROLE} matches cluster"
     else
-      check_fail "OIDC trust policy on ${ROLE}" "References a different OIDC provider — not the joshua cluster. Update the operational_roles stack with the real OIDC URL."
+      check_fail "OIDC trust policy on ${ROLE}" "References a different OIDC provider — not the ${EXPECTED_CLUSTER} cluster. Update the operational_roles stack with the real OIDC URL."
       OIDC_MISMATCH=true
     fi
   done

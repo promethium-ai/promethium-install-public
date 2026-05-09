@@ -8,7 +8,9 @@ This page documents instructions for the customer on how to setup prerequisites 
 - [Overview](#overview)
     - [How it works](#how-it-works)
     - [Environment Prerequisites](#environment-prerequisites)
-    - [Subnet Requirements](#subnet-requirements)
+    - [VPC and Subnet Requirements](#vpc-and-subnet-requirements)
+    - [Example layout for a `10.0.0.0/22` VPC (recommended — 3 private subnets + 1 public)](#example-layout-for-a-1000022-vpc-recommended--3-private-subnets--1-public)
+    - [Required subnet tags](#required-subnet-tags)
     - [Networking Requirements](#networking-requirements)
       - [Install VM - Outbound Access](#install-vm---outbound-access)
       - [EKS Nodes - Outbound Access](#eks-nodes---outbound-access)
@@ -25,11 +27,10 @@ This page documents instructions for the customer on how to setup prerequisites 
       - [Deploy the jumpbox stack](#deploy-the-jumpbox-stack)
     - [3.b Option B - Attach the instance profile to your provided install VM](#3b-option-b---attach-the-instance-profile-to-your-provided-install-vm)
   - [4. Operational Roles](#4-operational-roles)
-      - [4.a Option A — New cluster (default name format)](#4a-option-a--new-cluster-default-name-format)
-      - [4.b Option B — Pre-existing cluster (custom name override)](#4b-option-b--pre-existing-cluster-custom-name-override)
   - [5. Verification](#5-verification)
       - [5.1 Verifier Permissions (required before running verifier scripts)](#51-verifier-permissions-required-before-running-verifier-scripts)
-      - [5.2 Verifier Script (TODO)](#52-verifier-script-todo)
+  - [Where `verifier-permissions.json` is the policy JSON saved to a local file.](#where-verifier-permissionsjson-is-the-policy-json-saved-to-a-local-file)
+      - [5.2 Verifier Script](#52-verifier-script)
   - [6. Customer Information Required by Promethium](#6-customer-information-required-by-promethium)
     - [AWS Environment](#aws-environment)
     - [VPC and Subnets](#vpc-and-subnets)
@@ -39,8 +40,6 @@ This page documents instructions for the customer on how to setup prerequisites 
 
 ---
 # Overview
-
-TODO: get outputs automatically with aws cloudformation describe-stacks with outputs, rather than asking user to keep track of them.
 
 ### How it works
 
@@ -68,16 +67,42 @@ Once the customer has provided the prerequisite infrastructure and variables, th
 | GitHub PAT | A GitHub Personal Access Token with `read:packages` scope (provided by Promethium) |
 | Promethium Image Tag | Application release version (e.g., `24.2.2`) — provided by Promethium |
 
-### Subnet Requirements
+### VPC and Subnet Requirements
 
 Only private subnets are required. No public subnets are needed.
 
-| Configuration | Count | AZs | Routing | Required Tags |
+Your VPC must be at least a `/22` CIDR (e.g., `10.0.0.0/22`). Promethium uses an **internal load balancer** — only private subnets are required. No public subnets are needed.
+
+| Configuration | Private Subnets | AZs | Routing | Required Tags |
 |---|---|---|---|---|
 | **Required (minimum)** | 3 | 3 different AZs | NAT Gateway | `kubernetes.io/role/internal-elb=1` |
 | **Recommended** | 4 | 2+ different AZs | NAT Gateway | `kubernetes.io/role/internal-elb=1` |
 
-> **Note:** Public subnets must never have `kubernetes.io/*` tags to avoid unintended ALB subnet discovery.
+> ⚠️ **Minimum 3 private subnets across 3 availability zones are required.** The internal ALB and EKS node groups both use these subnets. More subnets across more AZs improve availability and provide additional IP space for nodes.
+
+> ⚠️ **EKS worker nodes must be placed in private subnets only.** Public subnets auto-assign public IPs to instances, which causes EKS node group creation to fail.
+
+> ℹ️ **Public subnets must not have kubernetes tags.** If your VPC has public subnets, ensure they have no `kubernetes.io/*` tags to avoid unintended ALB subnet discovery.
+
+### Example layout for a `10.0.0.0/22` VPC (recommended — 3 private subnets + 1 public)
+
+| Subnet | CIDR | AZ | Type | Purpose |
+|---|---|---|---|---|
+| subnet-1 | `10.0.0.0/24` | `us-east-1a` | Private | EKS worker nodes + internal ALB |
+| subnet-2 | `10.0.1.0/24` | `us-east-1b` | Private | EKS worker nodes + internal ALB |
+| subnet-3 | `10.0.2.0/24` | `us-east-1c` | Private | EKS worker nodes + internal ALB |
+| subnet-4 | `10.0.3.0/24` | `us-east-1a` | Public | NAT Gateway |
+
+### Required subnet tags
+
+All 3 private subnets must be tagged with the EKS cluster name **before** running Terraform:
+
+| Subnet type | Tag Key | Tag Value |
+|---|---|---|
+| Private | `kubernetes.io/role/internal-elb` | `1` |
+| Private | `kubernetes.io/cluster/<cluster_name>` | `owned` |
+
+Where `<cluster_name>` = `promethium-datafabric-prod-<company_name>-eks-cluster` if the customer did not already have a cluster with a custom name.
 
 ### Networking Requirements
 
@@ -107,11 +132,21 @@ Only private subnets are required. No public subnets are needed.
 
 # Setup Customer Prerequisites
 
-TODO: assumes linux
+Install jq (a JSON manipulation tool):
+```bash
+# for linux users
+sudo apt install jq
+
+# for macos users
+brew install jq
+```
+
+Set your company name and the region in your AWS account for the install:
 ```bash
 export COMPANY_NAME="..."
 export AWS_REGION="..."
 ```
+> NOTE: Instructions assume you are using linux/MacOS machine
 
 ## 1. IAM Install Roles
 
@@ -218,18 +253,13 @@ Or apply them manually:
 CLUSTER_NAME="promethium-datafabric-prod-${COMPANY_NAME}-eks-cluster"
 REGION="${AWS_REGION}"
 
+PRIVATE_SUBNET_IDS="<subnet-id-1> <subnet-id-2> <subnet-id-3>"  # Fill in: your private subnet IDs
 # Private subnets (EKS nodes)
-for SUBNET_ID in <private_subnet_1> <private_subnet_2>; do
+for SUBNET_ID in ${PRIVATE_SUBNET_IDS}; do
   aws ec2 create-tags --resources $SUBNET_ID --region $REGION --tags Key="kubernetes.io/cluster/${CLUSTER_NAME}",Value=owned Key="kubernetes.io/role/internal-elb",Value=1
 done
-
-# Public subnets (ALB) — must be in 2 different AZs
-# for SUBNET_ID in <public_subnet_1> <public_subnet_2>; do
-#   aws ec2 create-tags --resources $SUBNET_ID --region $REGION --tags \
-#     Key="kubernetes.io/cluster/${CLUSTER_NAME}",Value=owned \
-#     Key="kubernetes.io/role/elb",Value=1
-# done
 ```
+---
 
 ## 3. Jumpbox
 
@@ -250,7 +280,13 @@ The template is located at [`AWS/CFT/jumpbox.yaml`](CFT/jumpbox.yaml).
 #### Deploy the jumpbox stack
 
 ```bash
-aws cloudformation create-stack --stack-name pmie-jumpbox-${COMPANY_NAME} --template-body file://AWS/CFT/jumpbox.yaml --parameters ParameterKey=VpcId,ParameterValue=<vpc_id> ParameterKey=PrivateSubnet1Id,ParameterValue=<private_subnet_1_id> ParameterKey=JumpboxName,ParameterValue=${COMPANY_NAME}-jumpbox ParameterKey=UseExistingInstanceProfile,ParameterValue=PromethiumDeploymentRole-${COMPANY_NAME}InstanceProfile --region ${AWS_REGION}
+# From Promethium network CFT (Option A):
+VPC_ID=$(aws cloudformation describe-stacks --stack-name "pmie-network-${COMPANY_NAME}" --query 'Stacks[0].Outputs[?OutputKey==`VpcId`].OutputValue' --output text --region ${AWS_REGION})
+SUBNET1_ID=$(aws cloudformation describe-stacks --stack-name "pmie-network-${COMPANY_NAME}" --query 'Stacks[0].Outputs[?OutputKey==`Subnet1Id`].OutputValue' --output text --region ${AWS_REGION})
+# If using your own VPC (Option B), set these manually instead:
+# VPC_ID="<your-vpc-id>"
+# SUBNET1_ID="<your-private-subnet-id>"
+aws cloudformation create-stack --stack-name pmie-jumpbox-${COMPANY_NAME} --template-body file://AWS/CFT/jumpbox.yaml --parameters ParameterKey=VpcId,ParameterValue=${VPC_ID} ParameterKey=PrivateSubnet1Id,ParameterValue=${SUBNET1_ID} ParameterKey=JumpboxName,ParameterValue=${COMPANY_NAME}-jumpbox ParameterKey=UseExistingInstanceProfile,ParameterValue=PromethiumDeploymentRole-${COMPANY_NAME}InstanceProfile --region ${AWS_REGION}
 ```
 
 > ℹ️ Deploy the install role (Section 3) **before** this stack to attach the instance profile automatically via `UseExistingInstanceProfile`.
@@ -271,7 +307,9 @@ aws cloudformation describe-stacks --stack-name pmie-jumpbox-${COMPANY_NAME} --q
 ### 3.b Option B - Attach the instance profile to your provided install VM
 
 ```bash
-aws ec2 associate-iam-instance-profile --instance-id <install_vm_instance_id> --iam-instance-profile Name=<InstanceProfileName> --region ${AWS_REGION}
+INSTALL_VM_INSTANCE_ID="<your-ec2-instance-id>"  # Fill in: your existing EC2 instance ID
+INSTANCE_PROFILE_NAME=$(aws cloudformation describe-stacks --stack-name "promethium-install-role-${COMPANY_NAME}" --query 'Stacks[0].Outputs[?OutputKey==`InstanceProfileName`].OutputValue' --output text --region ${AWS_REGION})
+aws ec2 associate-iam-instance-profile --instance-id ${INSTALL_VM_INSTANCE_ID} --iam-instance-profile Name=${INSTANCE_PROFILE_NAME} --region ${AWS_REGION}
 ```
 
 ---
@@ -280,12 +318,7 @@ aws ec2 associate-iam-instance-profile --instance-id <install_vm_instance_id> --
 
 Deploy [`CFT/operational_roles.yaml`](CFT/operational_roles.yaml).
 
-- If you don't yet have an EKS cluster, follow **4.a** (skip **4.b**) since we will be using a default cluster name format.
-- If you already have an EKS cluster, follow **4.b** (skip **4.a**) to use your cluster's custom name.
-
 > `OIDCProviderUrl` is left as the default dummy value — it is updated after Phase 1a once the EKS cluster and OIDC provider exist.
-
-#### 4.a Option A — New cluster (default name format)
 
 Use this when Promethium will create the EKS cluster. The cluster name defaults to `promethium-datafabric-prod-${COMPANY_NAME}-eks-cluster`.
 
@@ -293,13 +326,6 @@ Use this when Promethium will create the EKS cluster. The cluster name defaults 
 aws cloudformation create-stack --stack-name promethium-eks-base-roles-${COMPANY_NAME} --template-body file://AWS/CFT/operational_roles.yaml --parameters ParameterKey=CompanyName,ParameterValue=${COMPANY_NAME} --capabilities CAPABILITY_NAMED_IAM --region ${AWS_REGION}
 ```
 
-#### 4.b Option B — Pre-existing cluster (custom name override)
-
-Use this when the customer already has an EKS cluster whose name differs from the default format. Set `CustomClusterName` to the existing cluster's name.
-
-```bash
-aws cloudformation create-stack --stack-name promethium-eks-base-roles-${COMPANY_NAME} --template-body file://AWS/CFT/operational_roles.yaml --parameters ParameterKey=CompanyName,ParameterValue=${COMPANY_NAME} ParameterKey=CustomClusterName,ParameterValue=<existing_cluster_name> --capabilities CAPABILITY_NAMED_IAM --region ${AWS_REGION}
-```
 ---
 
 Whichever option you chose, wait for completion and record the outputs:
@@ -341,31 +367,172 @@ This creates all 8 operational roles (all names are suffixed with `${COMPANY_NAM
 
 #### 5.1 Verifier Permissions (required before running verifier scripts)
 
-TODO: Where does this section really belong?
+Add the necessary read-only permissions to your own AWS user/role in order to run verification scripts:
 
-Before running the Promethium pre-install verifier scripts from the jumpbox, deploy [`CFT/verifier_policy.yaml`](CFT/verifier_policy.yaml) to add the necessary read-only permissions to the install role:
-
-```bash
-aws cloudformation create-stack \
-  --stack-name promethium-verifier-policy \
-  --template-body file://AWS/CFT/verifier_policy.yaml \
-  --parameters \
-    ParameterKey=PromethiumInstallRole,ParameterValue=PromethiumDeploymentRole \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --region <aws_region>
+```json
+cat > verifier-permissions.json << 'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "STSReadOnly",
+      "Effect": "Allow",
+      "Action": [
+        "sts:GetCallerIdentity"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "IAMReadOnly",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetRole",
+        "iam:ListRolePolicies",
+        "iam:GetRolePolicy",
+        "iam:ListAttachedRolePolicies",
+        "iam:ListInstanceProfilesForRole",
+        "iam:ListRoles"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "EC2ReadOnly",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeVpcs",
+        "ec2:DescribeVpcAttribute",
+        "ec2:DescribeSubnets",
+        "ec2:DescribeRouteTables",
+        "ec2:DescribeTags",
+        "ec2:DescribeNatGateways",
+        "ec2:DescribeInternetGateways"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "CloudFormationReadOnly",
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:DescribeStacks"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "EKSReadOnly",
+      "Effect": "Allow",
+      "Action": [
+        "eks:DescribeCluster"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+EOF
 ```
 
-> This policy grants read-only access to CloudFormation, IAM, and EKS — used only by the verifier scripts. It can be removed after the install is complete.
+> **Notes:**
+> - This policy grants read-only access to CloudFormation, IAM, and EKS used only by the verifier scripts. It can be removed after the install is complete.
+> - All permissions are read-only — the verification scripts make no changes to your AWS environment.
+> - `iam:ListRoles` is only used by `verify_operational_roles.sh --discover` mode. It can be omitted if `--discover` won't be used.
+> - All EC2 Describe actions require `Resource: "*"` — AWS does not support resource-level restrictions on these.
+> - `verify_install_role.sh` includes a cross-account trust test (section 5b) that attempts to assume `PromethiumDeploymentRole`. This test is only valid when run from the jumpbox with the instance profile attached — from a local terminal it will automatically skip with a warning. No `sts:AssumeRole` permission is needed.
 
-#### 5.2 Verifier Script (TODO)
+**If you are using an IAM role**:
 
 ```bash
-# TODO
+CUSTOMER_ROLE_NAME="<your-iam-role-name>"  # Fill in: your IAM role name
+aws iam put-role-policy \
+  --role-name ${CUSTOMER_ROLE_NAME} \
+  --policy-name promethium-verifier-policy \
+  --policy-document file://verifier-permissions.json \
+  --region ${AWS_REGION}
+```
+
+**If you are using an IAM user**:
+
+```bash
+CUSTOMER_USER_NAME="<your-iam-user-name>"  # Fill in: your IAM user name
+aws iam put-user-policy \
+  --user-name ${CUSTOMER_USER_NAME} \
+  --policy-name promethium-verifier-policy \
+  --policy-document file://verifier-permissions.json \
+  --region ${AWS_REGION}
+```
+
+Where `verifier-permissions.json` is the policy JSON saved to a local file.
+---
+
+#### 5.2 Verifier Script
+
+```bash
+curl -O https://raw.githubusercontent.com/promethium-ai/promethium-install-public/main/AWS/utilities/verify_install_role.sh
+chmod +x verify_install_role.sh
+./verify_install_role.sh PromethiumDeploymentRole-${COMPANY_NAME} ${AWS_REGION}
+
+curl -O https://raw.githubusercontent.com/promethium-ai/promethium-install-public/main/AWS/utilities/verify_network.sh
+chmod +x verify_network.sh
+# From Promethium network CFT (Option A):
+VPC_ID=$(aws cloudformation describe-stacks --stack-name "pmie-network-${COMPANY_NAME}" --query 'Stacks[0].Outputs[?OutputKey==`VpcId`].OutputValue' --output text --region ${AWS_REGION})
+# If using your own VPC (Option B), set manually instead:
+# VPC_ID="<your-vpc-id>"
+./verify_network.sh ${COMPANY_NAME} ${VPC_ID} ${AWS_REGION} --stack pmie-network-${COMPANY_NAME}
+
+curl -O https://raw.githubusercontent.com/promethium-ai/promethium-install-public/main/AWS/utilities/verify_operational_roles.sh
+chmod +x verify_operational_roles.sh
+./verify_operational_roles.sh ${COMPANY_NAME} ${AWS_REGION} promethium-eks-base-roles-${COMPANY_NAME}
+```
+
+Once verification is done, you may remove the trust policy it:
+
+If you are using an IAM role:
+```bash
+CUSTOMER_ROLE_NAME="<your-iam-role-name>"  # Fill in: your IAM role name
+aws iam delete-role-policy --role-name ${CUSTOMER_ROLE_NAME} --policy-name promethium-verifier-policy
+```
+
+If you are using an IAM user:
+```bash
+CUSTOMER_USER_NAME="<your-iam-user-name>"  # Fill in: your IAM user name
+aws iam delete-user-policy --user-name ${CUSTOMER_USER_NAME} --policy-name promethium-verifier-policy
 ```
 
 ---
 
 ## 6. Customer Information Required by Promethium
+
+Run the following command to collect all stack outputs into a shell script and send the file to your Promethium associate:
+
+```bash
+{
+  get_output() { aws cloudformation describe-stacks --stack-name "$1" --query "Stacks[0].Outputs[?OutputKey==\`$2\`].OutputValue" --output text --region ${AWS_REGION} 2>/dev/null; }
+  INSTALL_STACK="promethium-install-role-${COMPANY_NAME}"
+  NETWORK_STACK="pmie-network-${COMPANY_NAME}"
+  JUMPBOX_STACK="pmie-jumpbox-${COMPANY_NAME}"
+  ROLES_STACK="promethium-eks-base-roles-${COMPANY_NAME}"
+  echo "export COMPANY_NAME=\"${COMPANY_NAME}\""
+  echo "export AWS_REGION=\"${AWS_REGION}\""
+  echo "export CUSTOMER_ACCOUNT_ID=\"$(aws sts get-caller-identity --query Account --output text --region ${AWS_REGION})\""
+  echo "export TERRAFORM_ASSUME_ROLE_ARN=\"$(get_output $INSTALL_STACK RoleArn)\""
+  echo "export INSTANCE_PROFILE_NAME=\"$(get_output $INSTALL_STACK InstanceProfileName)\""
+  echo "export VPC_ID=\"$(get_output $NETWORK_STACK VpcId)\""
+  echo "export VPC_CIDR=\"$(get_output $NETWORK_STACK VpcCidrBlock)\""
+  echo "export SUBNET1_ID=\"$(get_output $NETWORK_STACK Subnet1Id)\""
+  echo "export SUBNET2_ID=\"$(get_output $NETWORK_STACK Subnet2Id)\""
+  echo "export SUBNET3_ID=\"$(get_output $NETWORK_STACK Subnet3Id)\""
+  echo "export JUMPBOX_INSTANCE_ID=\"$(get_output $JUMPBOX_STACK JumpboxInstanceId)\""
+  echo "export JUMPBOX_SG_ID=\"$(get_output $JUMPBOX_STACK JumpboxSecurityGroupId)\""
+  echo "export EKS_CLUSTER_ROLE_ARN=\"$(get_output $ROLES_STACK EKSClusterRoleArn)\""
+  echo "export EKS_WORKER_ROLE_ARN=\"$(get_output $ROLES_STACK EKSWorkerNodeRoleArn)\""
+  echo "export EBS_CSI_ROLE_ARN=\"$(get_output $ROLES_STACK EBSCSIDriverRoleArn)\""
+  echo "export EFS_CSI_ROLE_ARN=\"$(get_output $ROLES_STACK EFSCSIDriverRoleArn)\""
+  echo "export LB_CONTROLLER_ROLE_ARN=\"$(get_output $ROLES_STACK LoadBalancerControllerRoleArn)\""
+  echo "export AUTOSCALER_ROLE_ARN=\"$(get_output $ROLES_STACK ClusterAutoscalerRoleArn)\""
+  echo "export PG_BACKUP_ROLE_ARN=\"$(get_output $ROLES_STACK PGBackupServiceRoleArn)\""
+  echo "export TRINO_ROLE_ARN=\"$(get_output $ROLES_STACK GlueTrinoServiceRoleArn)\""
+} | tee promethium-outputs-${COMPANY_NAME}.sh
+```
+
+The following sections describe the outputs collected above.
 
 ### AWS Environment
 

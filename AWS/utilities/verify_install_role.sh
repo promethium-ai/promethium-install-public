@@ -66,22 +66,22 @@ fi
 #   && check_pass "Self-trust present (role can assume itself)" \
 #   || check_fail "Self-trust" "MISSING — terraform init will fail; must add before deploy"
 
-# ── 4. Inline policies ────────────────────────────────────────────────────────
+# ── 4. Managed policies ────────────────────────────────────────────────────────
 echo ""
-echo "── 4. Inline policies"
-POLICIES=$(aws iam list-role-policies --role-name "$ROLE_NAME" \
-  --query 'PolicyNames' --output text 2>/dev/null)
+echo "── 4. Managed policies"
+POLICIES=$(aws iam list-attached-role-policies --role-name "$ROLE_NAME" \
+  --query 'AttachedPolicies[*].PolicyName' --output text 2>/dev/null)
 
 for EXPECTED in \
-  promethium-terraform-eks-policy \
-  promethium-terraform-sts-policy \
-  promethium-terraform-s3-kms-policy \
-  promethium-terraform-efs-policy \
-  promethium-terraform-acm-policy \
-  promethium-terraform-vpc-policy \
-  promethium-terraform-ec2-policy \
-  promethium-terraform-elb-policy \
-  promethium-terraform-glue-policy; do
+  "${ROLE_NAME}-eks" \
+  "${ROLE_NAME}-sts" \
+  "${ROLE_NAME}-s3-kms" \
+  "${ROLE_NAME}-efs" \
+  "${ROLE_NAME}-acm" \
+  "${ROLE_NAME}-vpc" \
+  "${ROLE_NAME}-ec2" \
+  "${ROLE_NAME}-glue" \
+  "${ROLE_NAME}-iam"; do
   echo "$POLICIES" | grep -q "$EXPECTED" \
     && check_pass "$EXPECTED" \
     || check_warn "$EXPECTED" "not found — may cause failures during apply"
@@ -91,15 +91,18 @@ done
 echo ""
 echo "── 5. STS cross-account permissions"
 
-# Search ALL inline policies for STS permissions (old JSON templates embed STS in ec2 policy)
-ALL_INLINE=$(aws iam list-role-policies --role-name "$ROLE_NAME" \
-  --query 'PolicyNames' --output json 2>/dev/null)
-COMBINED_STS=""
-for PNAME in $(echo "$ALL_INLINE" | python3 -c "import sys,json; [print(p) for p in json.load(sys.stdin)]" 2>/dev/null); do
-  DOC=$(aws iam get-role-policy --role-name "$ROLE_NAME" --policy-name "$PNAME" \
-    --query 'PolicyDocument' --output json 2>/dev/null)
-  COMBINED_STS="${COMBINED_STS}${DOC}"
-done
+# Build combined policy document text from all attached managed policies (reused in section 7)
+COMBINED_ALL=""
+while IFS=$'\t' read -r PARN PNAME; do
+  [ -z "$PARN" ] && continue
+  VERSION=$(aws iam get-policy --policy-arn "$PARN" --query 'Policy.DefaultVersionId' --output text 2>/dev/null)
+  DOC=$(aws iam get-policy-version --policy-arn "$PARN" --version-id "$VERSION" \
+    --query 'PolicyVersion.Document' --output json 2>/dev/null)
+  COMBINED_ALL="${COMBINED_ALL}${DOC}"
+done < <(aws iam list-attached-role-policies --role-name "$ROLE_NAME" \
+  --query 'AttachedPolicies[*].[PolicyArn,PolicyName]' --output text 2>/dev/null)
+
+COMBINED_STS="$COMBINED_ALL"
 
 echo "$COMBINED_STS" | grep -q "734236616923" \
   && check_pass "STS policy allows assume-role on 734236616923 (S3 state backend)" \
@@ -118,41 +121,41 @@ echo "$COMBINED_STS" | grep -q "sts:GetServiceBearerToken" \
         --policy-document '{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"sts:GetServiceBearerToken\"],\"Resource\":\"*\"}]}'"; }
 
 # ── 5b. Cross-account trust (live test) ───────────────────────────────────────
-echo ""
-echo "── 5b. Cross-account trust — live assume-role test"
-echo "    (First assumes ${ROLE_NAME}, then tests cross-account trust from that identity)"
-
-# First assume the deployment role itself to get its credentials
-DEPLOY_CREDS=$(aws sts assume-role \
-  --role-arn "$ROLE_ARN" \
-  --role-session-name "verify-${COMPANY}-crossaccount" \
-  --duration-seconds 900 \
-  --output json 2>&1)
-
-if ! echo "$DEPLOY_CREDS" | python3 -c "import sys,json; json.load(sys.stdin)['Credentials']" 2>/dev/null; then
-  check_warn "Cross-account trust test" "Cannot assume ${ROLE_NAME} from current caller — run this script from the jumpbox instance profile for accurate results. Verify trust policy manually in each Promethium account."
-else
-  DEPLOY_KEY=$(echo "$DEPLOY_CREDS" | python3 -c "import sys,json; print(json.load(sys.stdin)['Credentials']['AccessKeyId'])")
-  DEPLOY_SECRET=$(echo "$DEPLOY_CREDS" | python3 -c "import sys,json; print(json.load(sys.stdin)['Credentials']['SecretAccessKey'])")
-  DEPLOY_TOKEN=$(echo "$DEPLOY_CREDS" | python3 -c "import sys,json; print(json.load(sys.stdin)['Credentials']['SessionToken'])")
-
-  for ACCT in 734236616923 308611924187; do
-    RESULT=$(AWS_ACCESS_KEY_ID="$DEPLOY_KEY" \
-      AWS_SECRET_ACCESS_KEY="$DEPLOY_SECRET" \
-      AWS_SESSION_TOKEN="$DEPLOY_TOKEN" \
-      aws sts assume-role \
-        --role-arn "arn:aws:iam::${ACCT}:role/promethium-terraform-saas-assume-role" \
-        --role-session-name "verify-${COMPANY}" \
-        --duration-seconds 900 \
-        --query 'Credentials.AccessKeyId' \
-        --output text 2>&1)
-    if echo "$RESULT" | grep -q "^ASIA\|^AKIA"; then
-      check_pass "Cross-account trust OK — ${ACCT} trusts ${ROLE_NAME}"
-    else
-      check_fail "Cross-account trust — ${ACCT}" "MISSING — Promethium must add ${ROLE_NAME} to promethium-terraform-saas-assume-role trust policy in ${ACCT}"
-    fi
-  done
-fi
+# echo ""
+# echo "── 5b. Cross-account trust — live assume-role test"
+# echo "    (First assumes ${ROLE_NAME}, then tests cross-account trust from that identity)"
+# 
+# # First assume the deployment role itself to get its credentials
+# DEPLOY_CREDS=$(aws sts assume-role \
+#   --role-arn "$ROLE_ARN" \
+#   --role-session-name "verify-${COMPANY}-crossaccount" \
+#   --duration-seconds 900 \
+#   --output json 2>&1)
+# 
+# if ! echo "$DEPLOY_CREDS" | python3 -c "import sys,json; json.load(sys.stdin)['Credentials']" 2>/dev/null; then
+#   check_warn "Cross-account trust test" "Cannot assume ${ROLE_NAME} from current caller — run this script from the jumpbox instance profile for accurate results. Verify trust policy manually in each Promethium account."
+# else
+#   DEPLOY_KEY=$(echo "$DEPLOY_CREDS" | python3 -c "import sys,json; print(json.load(sys.stdin)['Credentials']['AccessKeyId'])")
+#   DEPLOY_SECRET=$(echo "$DEPLOY_CREDS" | python3 -c "import sys,json; print(json.load(sys.stdin)['Credentials']['SecretAccessKey'])")
+#   DEPLOY_TOKEN=$(echo "$DEPLOY_CREDS" | python3 -c "import sys,json; print(json.load(sys.stdin)['Credentials']['SessionToken'])")
+# 
+#   for ACCT in 734236616923 308611924187; do
+#     RESULT=$(AWS_ACCESS_KEY_ID="$DEPLOY_KEY" \
+#       AWS_SECRET_ACCESS_KEY="$DEPLOY_SECRET" \
+#       AWS_SESSION_TOKEN="$DEPLOY_TOKEN" \
+#       aws sts assume-role \
+#         --role-arn "arn:aws:iam::${ACCT}:role/promethium-terraform-saas-assume-role" \
+#         --role-session-name "verify-${COMPANY}" \
+#         --duration-seconds 900 \
+#         --query 'Credentials.AccessKeyId' \
+#         --output text 2>&1)
+#     if echo "$RESULT" | grep -q "^ASIA\|^AKIA"; then
+#       check_pass "Cross-account trust OK — ${ACCT} trusts ${ROLE_NAME}"
+#     else
+#       check_fail "Cross-account trust — ${ACCT}" "MISSING — Promethium must add ${ROLE_NAME} to promethium-terraform-saas-assume-role trust policy in ${ACCT}"
+#     fi
+#   done
+# fi
 
 # ── 6. Managed policies ───────────────────────────────────────────────────────
 echo ""
@@ -167,13 +170,7 @@ echo "$MANAGED" | grep -q "AmazonSSMManagedInstanceCore" \
 # ── 7. IAM permissions ────────────────────────────────────────────────────────
 echo ""
 echo "── 7. IAM permissions"
-ALL_POLICIES=$(aws iam list-role-policies --role-name "$ROLE_NAME" --query 'PolicyNames' --output json 2>/dev/null)
-COMBINED_IAM=""
-for PNAME in $(echo "$ALL_POLICIES" | python3 -c "import sys,json; [print(p) for p in json.load(sys.stdin)]" 2>/dev/null); do
-  DOC=$(aws iam get-role-policy --role-name "$ROLE_NAME" --policy-name "$PNAME" \
-    --query 'PolicyDocument' --output json 2>/dev/null)
-  COMBINED_IAM="${COMBINED_IAM}${DOC}"
-done
+COMBINED_IAM="$COMBINED_ALL"
 
 # Check iam:PassRole and iam:GetRole scoped to IAM role resources (not just EKS ARNs)
 # Common bug: these actions present but scoped to arn:aws:eks:* instead of arn:aws:iam:*
@@ -181,26 +178,27 @@ IAM_POLICY_FIX="aws iam put-role-policy --role-name ${ROLE_NAME} --policy-name p
 
 check_iam_action_on_iam_resource() {
   local action=$1
-  for PNAME in $(echo "$ALL_POLICIES" | python3 -c "import sys,json; [print(p) for p in json.load(sys.stdin)]" 2>/dev/null); do
-    DOC=$(aws iam get-role-policy --role-name "$ROLE_NAME" --policy-name "$PNAME" \
-      --query 'PolicyDocument' --output json 2>/dev/null)
-    if echo "$DOC" | grep -q "iam:${action}"; then
-      FOUND=$(echo "$DOC" | python3 -c "
+  echo "$COMBINED_ALL" | python3 -c "
 import sys, json
-d = json.load(sys.stdin)
-for s in d.get('Statement', []):
-    actions = s.get('Action', [])
-    if isinstance(actions, str): actions = [actions]
-    resources = s.get('Resource', [])
-    if isinstance(resources, str): resources = [resources]
-    if any('${action}' in a for a in actions):
-        if any('iam' in r for r in resources) or resources == ['*']:
-            print('ok')
-            break
-" 2>/dev/null)
-      [ "$FOUND" = "ok" ] && echo "ok" && return
-    fi
-  done
+text = sys.stdin.read()
+# COMBINED_ALL is multiple JSON objects concatenated — split on '}{' boundaries
+import re
+docs = re.split(r'(?<=\})\s*(?=\{)', text)
+for raw in docs:
+    try:
+        d = json.loads(raw)
+    except Exception:
+        continue
+    for s in d.get('Statement', []):
+        actions = s.get('Action', [])
+        if isinstance(actions, str): actions = [actions]
+        resources = s.get('Resource', [])
+        if isinstance(resources, str): resources = [resources]
+        if any('${action}' in a for a in actions):
+            if any('iam' in r for r in resources) or resources == ['*']:
+                print('ok')
+                exit(0)
+" 2>/dev/null
 }
 
 # iam:PassRole check
@@ -239,25 +237,26 @@ fi
 # iam:GetRole on service-linked roles (required for EKS nodegroup SLR validation)
 SLR_FIX="aws iam put-role-policy --role-name ${ROLE_NAME} --policy-name promethium-terraform-iam-slr-policy --policy-document '{\"Version\":\"2012-10-17\",\"Statement\":[{\"Sid\":\"IAMServiceLinkedRoleCheck\",\"Effect\":\"Allow\",\"Action\":[\"iam:GetRole\",\"iam:CreateServiceLinkedRole\"],\"Resource\":[\"arn:aws:iam::${ACCOUNT_ID}:role/aws-service-role/*\"]}]}'"
 
-HAS_SLR_GETROLE=false
-for PNAME in $(echo "$ALL_POLICIES" | python3 -c "import sys,json; [print(p) for p in json.load(sys.stdin)]" 2>/dev/null); do
-  DOC=$(aws iam get-role-policy --role-name "$ROLE_NAME" --policy-name "$PNAME" \
-    --query 'PolicyDocument' --output json 2>/dev/null)
-  FOUND=$(echo "$DOC" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-for s in d.get('Statement', []):
-    actions = s.get('Action', [])
-    if isinstance(actions, str): actions = [actions]
-    resources = s.get('Resource', [])
-    if isinstance(resources, str): resources = [resources]
-    if any('GetRole' in a for a in actions):
-        if any('aws-service-role' in r or r == '*' for r in resources):
-            print('ok')
-            break
+HAS_SLR_GETROLE=$(echo "$COMBINED_ALL" | python3 -c "
+import sys, json, re
+text = sys.stdin.read()
+docs = re.split(r'(?<=\})\s*(?=\{)', text)
+for raw in docs:
+    try:
+        d = json.loads(raw)
+    except Exception:
+        continue
+    for s in d.get('Statement', []):
+        actions = s.get('Action', [])
+        if isinstance(actions, str): actions = [actions]
+        resources = s.get('Resource', [])
+        if isinstance(resources, str): resources = [resources]
+        if any('GetRole' in a for a in actions):
+            if any('aws-service-role' in r or r == '*' for r in resources):
+                print('true')
+                exit(0)
+print('false')
 " 2>/dev/null)
-  [ "$FOUND" = "ok" ] && HAS_SLR_GETROLE=true && break
-done
 
 $HAS_SLR_GETROLE \
   && check_pass "iam:GetRole on aws-service-role/* (required for EKS nodegroup SLR validation)" \

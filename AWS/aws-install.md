@@ -6,6 +6,37 @@ The customer provides an existing VPC (with subnets and routing), an EC2 install
 
 Promethium is deployed with an **internal load balancer** — accessible via VPN only.
 
+- [Promethium Intelligent Edge AWS Installation (Promethium Associate)](#promethium-intelligent-edge-aws-installation-promethium-associate)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+  - [Setup: Connect to the Install VM and Load Variables](#setup-connect-to-the-install-vm-and-load-variables)
+  - [0. Create Customer Branch](#0-create-customer-branch)
+    - [Github Token](#github-token)
+    - [Login to Helm OCI registry](#login-to-helm-oci-registry)
+    - [0.1 Configure `backend.tf`](#01-configure-backendtf)
+    - [0.2 Create `terraform.tfvars`](#02-create-terraformtfvars)
+  - [1. Grant Cross-Account Trust](#1-grant-cross-account-trust)
+  - [2. Verification (optional)](#2-verification-optional)
+      - [2.1 Verifier Permissions (required before running verifier scripts)](#21-verifier-permissions-required-before-running-verifier-scripts)
+      - [2.2 Verifier Steps (Promethium Associate)](#22-verifier-steps-promethium-associate)
+  - [3. Tool Installation](#3-tool-installation)
+  - [4. Terraform Steps](#4-terraform-steps)
+    - [4.1 Configure GHCR\_TOKEN](#41-configure-ghcr_token)
+    - [4.2 Clone the deployment repo](#42-clone-the-deployment-repo)
+  - [5. Deployment](#5-deployment)
+    - [Phase 1 — AWS Infrastructure](#phase-1--aws-infrastructure)
+      - [Phase 1a — Create EKS cluster](#phase-1a--create-eks-cluster)
+      - [Phase 1b — Authorize jumpbox to cluster API](#phase-1b--authorize-jumpbox-to-cluster-api)
+      - [Phase 1c — Complete AWS infrastructure](#phase-1c--complete-aws-infrastructure)
+    - [Phase 2 — Not required for AWS](#phase-2--not-required-for-aws)
+    - [Phase 3 — Promethium Services](#phase-3--promethium-services)
+  - [6. Post-Install Steps](#6-post-install-steps)
+    - [6.1 Check pods](#61-check-pods)
+    - [6.2 Update support password](#62-update-support-password)
+  - [7. Troubleshooting](#7-troubleshooting)
+  - [8. Teardown](#8-teardown)
+
+
 ---
 
 # Prerequisites
@@ -22,158 +53,90 @@ Promethium is deployed with an **internal load balancer** — accessible via VPN
 
 ---
 
-# Requirements
-
-### VPC & Subnet Requirements
-
-Your VPC must be at least a `/22` CIDR (e.g., `10.0.0.0/22`). Promethium uses an **internal load balancer** — only private subnets are required. No public subnets are needed.
-
-| Configuration | Private Subnets | AZs | Routing | Required Tags |
-|---|---|---|---|---|
-| **Required (minimum)** | 3 | 3 different AZs | NAT Gateway | `kubernetes.io/role/internal-elb=1` |
-| **Recommended** | 4 | 2+ different AZs | NAT Gateway | `kubernetes.io/role/internal-elb=1` |
-
-> ⚠️ **Minimum 3 private subnets across 3 availability zones are required.** The internal ALB and EKS node groups both use these subnets. More subnets across more AZs improve availability and provide additional IP space for nodes.
-
-> ⚠️ **EKS worker nodes must be placed in private subnets only.** Public subnets auto-assign public IPs to instances, which causes EKS node group creation to fail.
-
-> ℹ️ **Public subnets must not have kubernetes tags.** If your VPC has public subnets, ensure they have no `kubernetes.io/*` tags to avoid unintended ALB subnet discovery.
-
-### Example layout for a `10.0.0.0/22` VPC (recommended — 3 private subnets + 1 public)
-
-| Subnet | CIDR | AZ | Type | Purpose |
-|---|---|---|---|---|
-| subnet-1 | `10.0.0.0/24` | `us-east-1a` | Private | EKS worker nodes + internal ALB |
-| subnet-2 | `10.0.1.0/24` | `us-east-1b` | Private | EKS worker nodes + internal ALB |
-| subnet-3 | `10.0.2.0/24` | `us-east-1c` | Private | EKS worker nodes + internal ALB |
-| subnet-4 | `10.0.3.0/24` | `us-east-1a` | Public | NAT Gateway |
-
-### Required subnet tags
-
-All 3 private subnets must be tagged with the EKS cluster name **before** running Terraform:
-
-| Subnet type | Tag Key | Tag Value |
-|---|---|---|
-| Private | `kubernetes.io/role/internal-elb` | `1` |
-| Private | `kubernetes.io/cluster/<cluster_name>` | `owned` |
-
-Where `<cluster_name>` = `promethium-datafabric-prod-<company_name>-eks-cluster` if the customer did not already have a cluster with a custom name.
-
----
-
 # Installation
 
-## 1. Grant Cross-Account Trust
+## Setup: Connect to the Install VM and Load Variables
 
-> ⚠️ **This step is performed by Promethium**, not the customer. It must be completed before Terraform runs.
+All commands in this guide are run from the **install VM (jumpbox)**. Connect to it via **AWS Console → EC2 → Instances → select the jumpbox → Connect → Session Manager**.
 
-Promethium's two internal accounts need to trust the customer's deployment role so that:
-- The S3 Terraform state backend can be accessed (account `734236616923`)
-- The DynamoDB tenant lookup can run (account `308611924187`)
+Copy `promethium-outputs-<company_name>.sh` (generated in [README.md Section 6](README.md#6-customer-information-required-by-promethium)) to the jumpbox, then source it at the start of each session:
 
-Add `PromethiumDeploymentRole-<company_name>` to the trust policy of `promethium-terraform-saas-assume-role` in **both** accounts:
+> Replace `<company_name>` with the customer's company name before running.
 
 ```bash
-# Account 734236616923 (S3 state backend)
-aws iam update-assume-role-policy \
-  --role-name promethium-terraform-saas-assume-role \
-  --policy-document "$(aws iam get-role \
-    --role-name promethium-terraform-saas-assume-role \
-    --query 'Role.AssumeRolePolicyDocument' \
-    --output json | jq '.Statement += [{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::<customer_account_id>:role/PromethiumDeploymentRole-<company_name>"},"Action":"sts:AssumeRole","Condition":{"StringEquals":{"sts:ExternalId":"iac-terraform"}}}]')" \
-  --profile <734236616923-profile>
-
-# Account 308611924187 (DynamoDB tenant lookup)
-aws iam update-assume-role-policy \
-  --role-name promethium-terraform-saas-assume-role \
-  --policy-document "$(aws iam get-role \
-    --role-name promethium-terraform-saas-assume-role \
-    --query 'Role.AssumeRolePolicyDocument' \
-    --output json | jq '.Statement += [{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::<customer_account_id>:role/PromethiumDeploymentRole-<company_name>"},"Action":"sts:AssumeRole","Condition":{"StringEquals":{"sts:ExternalId":"iac-terraform"}}}]')" \
-  --profile <308611924187-profile>
+source promethium-outputs-<company_name>.sh
 ```
 
 ---
 
-## 2. Tool Installation
+## 0. Create Customer Branch
 
-TODO: how to login without interactive username/password
-
-SSH or SSM into the install VM, then run:
-
-```bash
-sudo su
-cd
-curl -O https://raw.githubusercontent.com/promethium-ai/promethium-install-public/main/AWS/utilities/install_tools.sh
-bash install_tools.sh
-```
-
-Or use the install script provided in this repo:
-
-TODO: need to git clone the repo before doing this
-
-```bash
-cd AWS && ./utilities/install_tools.sh
-```
-
----
-
-## 3. Configure Terraform
-
-### 3.1 Clone the deployment repo
-
-From the Install VM/jumpbox, do:
-
-TODO: how to login without interactive username/password
-TODO: if we are going to do everything in VM, then the internal-ie-aws branch name needs to be created there also
-
-```bash
-# git clone -b <company_name> --single-branch https://github.com/promethium-ai/promethium-internal-ie-aws.git
-```
+> ⚠️ **Run this on your local machine**, not the jumpbox — this is the only step in the guide that is not run on the install VM.
 
 ```bash
 git clone https://github.com/promethium-ai/promethium-internal-ie-aws.git
 cd promethium-internal-ie-aws
-git checkout -b <release_branch>   # provided by Promethium (company name)
+git checkout main && git pull
+git checkout -b ${COMPANY_NAME}
+git push -u origin ${COMPANY_NAME}
 ```
 
-TODO: there are no regular release tags for promethium-internal-ie-aws, I am doing this from main branch.
+### Github Token
 
-### 3.2 Configure `backend.tf`
+> Replace `<github_pat>` and `<ghcr_token>` with the values provided by Promethium.
 
-> Remember, `<env>` is `prod`
+```bash
+# GitHub tokens
+export GH_TOKEN="<github_pat>"
+export GHCR_TOKEN="<ghcr_token>"
+# TODO: this may take care of authentication/password
+git config --global url."https://${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
+```
 
-```hcl
+### Login to Helm OCI registry
+
+```bash
+# TODO research this
+export HELM_EXPERIMENTAL_OCI=1
+helm registry login ghcr.io -u promethium-ai --password-stdin <<< "$GHCR_TOKEN"
+```
+
+### 0.1 Configure `backend.tf`
+
+```bash
+cat > backend.tf << EOF
 terraform {
   backend "s3" {
     bucket  = "pm61-iac-terraform-state"
-    key     = "<env>/<company_name>/terraform.tfstate"
+    key     = "prod/${COMPANY_NAME}/terraform.tfstate"
     region  = "us-east-1"
   }
 }
+EOF
 ```
 
-### 3.3 Create `terraform.tfvars`
+### 0.2 Create `terraform.tfvars`
 
-Replace all `<placeholder>` values before proceeding:
+> After running, replace `<image_tag>` in `terraform.tfvars` with the Promethium release version provided by Promethium.
 
-```hcl
+```bash
+cat > terraform.tfvars << EOF
 # ── Core ──────────────────────────────────────────────────────────────────────
-env          = "prod"            # dev | qa | preview | prod
-company_name = "<company_name>"   # max 15 chars, lowercase, no spaces
-aws_region   = "<aws_region>"     # e.g. us-east-1
+env          = "prod"
+company_name = "${COMPANY_NAME}"
+aws_region   = "${AWS_REGION}"
 
 # ── Terraform identity ────────────────────────────────────────────────────────
-terraform_assume_role_arn = "<RoleArn from Stack 1>"
+terraform_assume_role_arn = "${TERRAFORM_ASSUME_ROLE_ARN}"
 
 # ── VPC (customer-provided) ───────────────────────────────────────────────────
 vpc_enabled = false
 
 vpc_info = {
-  vpc_id         = "<vpc_id>"
+  vpc_id         = "${VPC_ID}"
   # Private subnets only — do NOT include public subnets here
-  subnet_ids     = ["<private_subnet_1>", "<private_subnet_2>"]
-  vpc_cidr_block = "<vpc_cidr>"   # e.g. 10.0.0.0/22
+  subnet_ids     = ["${SUBNET1_ID}", "${SUBNET2_ID}", "${SUBNET3_ID}"]
+  vpc_cidr_block = "${VPC_CIDR}"
 }
 
 # ── IAM ───────────────────────────────────────────────────────────────────────
@@ -181,24 +144,24 @@ vpc_info = {
 iam_role_create      = false
 aws_iam_oidc_enabled = false
 
-cluster_role_arn                = "<EKSClusterRoleArn from operational_roles stack>"
-worker_role_arn                 = "<EKSWorkerNodeRoleArn from operational_roles stack>"
-aws_ebs_driver_role_arn         = "<EBSCSIDriverRoleArn from operational_roles stack>"
-aws_efs_driver_role_arn         = "<EFSCSIDriverRoleArn from operational_roles stack>"
-aws_lb_controller_role_arn      = "<LoadBalancerControllerRoleArn from operational_roles stack>"
-aws_eks_autoscaler_role_arn     = "<ClusterAutoscalerRoleArn from operational_roles stack>"
-pg_backup_cronjob_oidc_role_arn = "<PGBackupServiceRoleArn from operational_roles stack>"
-trino_oidc_role_arn             = "<GlueTrinoServiceRoleArn from operational_roles stack>"
+cluster_role_arn                = "${EKS_CLUSTER_ROLE_ARN}"
+worker_role_arn                 = "${EKS_WORKER_ROLE_ARN}"
+aws_ebs_driver_role_arn         = "${EBS_CSI_ROLE_ARN}"
+aws_efs_driver_role_arn         = "${EFS_CSI_ROLE_ARN}"
+aws_lb_controller_role_arn      = "${LB_CONTROLLER_ROLE_ARN}"
+aws_eks_autoscaler_role_arn     = "${AUTOSCALER_ROLE_ARN}"
+pg_backup_cronjob_oidc_role_arn = "${PG_BACKUP_ROLE_ARN}"
+trino_oidc_role_arn             = "${TRINO_ROLE_ARN}"
 
 # ── EKS ───────────────────────────────────────────────────────────────────────
 custom_cluster_name = true
-eks_cluster_name    = "promethium-datafabric-prod-<company_name>-eks-cluster"
+eks_cluster_name    = "promethium-datafabric-prod-${COMPANY_NAME}-eks-cluster"
 eks_cluster_type    = "private"
 jumpbox_enabled     = false
 loadbalancer_type   = "internal"
 
-jumpbox_sg_id                 = "<JumpboxSecurityGroupId>"
-jumpbox_instance_profile_name = "<InstanceProfileName from install_role stack>"
+jumpbox_sg_id                 = "${JUMPBOX_SG_ID}"
+jumpbox_instance_profile_name = "${INSTANCE_PROFILE_NAME}"
 
 # ── Promethium application ────────────────────────────────────────────────────
 promethium_image_tag = "<image_tag>"   # e.g. 24.2.2
@@ -212,46 +175,102 @@ default_tags = {
   Project     = "Intelligentedge"
   persist     = "false"
 }
+EOF
 ```
-
-TODO add isntructions for dev2 IAC
 
 > ⚠️ **`subnet_ids` must contain only private subnets.** EKS worker nodes are placed in these subnets. Public subnets auto-assign public IPs to instances and will cause the node group to fail.
 
+## 1. Grant Cross-Account Trust
 
-TODO: Why are there no instructions to change main.tf IAC ref from dev2 to release tag e.g. `24.2.2`?
+> ⚠️ **This step is performed by Promethium**, not the customer. It must be completed before Terraform runs.
+
+Promethium's two internal accounts need to trust the customer's deployment role so that:
+- The S3 Terraform state backend can be accessed (account `734236616923`)
+- The DynamoDB tenant lookup can run (account `308611924187`)
+
+Add `PromethiumDeploymentRole-${COMPANY_NAME}` to the trust policy of `promethium-terraform-saas-assume-role` in **both** accounts:
+
+> Replace `<734236616923-profile>` and `<308611924187-profile>` with your local AWS CLI profile names for each account.
+
+```bash
+# Account 734236616923 (S3 state backend)
+aws iam update-assume-role-policy --role-name promethium-terraform-saas-assume-role --policy-document "$(aws iam get-role --role-name promethium-terraform-saas-assume-role --query 'Role.AssumeRolePolicyDocument' --output json | jq '.Statement += [{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::'"${CUSTOMER_ACCOUNT_ID}"':role/PromethiumDeploymentRole-'"${COMPANY_NAME}"'"},"Action":"sts:AssumeRole","Condition":{"StringEquals":{"sts:ExternalId":"iac-terraform"}}}]')" --profile <734236616923-profile>
+
+# Account 308611924187 (DynamoDB tenant lookup)
+aws iam update-assume-role-policy --role-name promethium-terraform-saas-assume-role --policy-document "$(aws iam get-role --role-name promethium-terraform-saas-assume-role --query 'Role.AssumeRolePolicyDocument' --output json | jq '.Statement += [{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::'"${CUSTOMER_ACCOUNT_ID}"':role/PromethiumDeploymentRole-'"${COMPANY_NAME}"'"},"Action":"sts:AssumeRole","Condition":{"StringEquals":{"sts:ExternalId":"iac-terraform"}}}]')" --profile <308611924187-profile>
+```
 ---
 
-## 4. Deployment
+## 2. Verification (optional)
 
-TODO: describe all in jumpbox
+#### 2.1 Verifier Permissions (required before running verifier scripts)
+
+Run the following if the customer has not run verification or something went wrong with their verification.
+
+Before running the Promethium pre-install verifier scripts on then install VM/jumpbox, deploy [`CFT/verifier_policy.yaml`](CFT/verifier_policy.yaml) to add the necessary read-only permissions to the install role:
+
+```bash
+aws cloudformation create-stack --stack-name promethium-verifier-policy --template-body file://AWS/CFT/verifier_policy.yaml --parameters ParameterKey=PromethiumInstallRole,ParameterValue=PromethiumDeploymentRole-${COMPANY_NAME} --capabilities CAPABILITY_NAMED_IAM --region ${AWS_REGION}
+```
+
+> This policy grants read-only access to CloudFormation, IAM, and EKS — used only by the verifier scripts. It can be removed after the install is complete.
+
+#### 2.2 Verifier Steps (Promethium Associate)
+
+First run as root and get into the default directory `/root`:
+```bash
+sudo su
+cd
+```
+The rest of the jumpbox commands must be run in this `/root` environment.
+
+```bash
+curl -O https://raw.githubusercontent.com/promethium-ai/promethium-install-public/main/AWS/utilities/verify_cross_account_trust.sh
+bash verify_cross_account_trust.sh PromethiumDeploymentRole-${COMPANY_NAME} ${AWS_REGION}
+```
+
+## 3. Tool Installation
+
+SSH or SSM into the install VM, then run:
+
+```bash
+sudo su
+cd
+curl -O https://raw.githubusercontent.com/promethium-ai/promethium-install-public/main/AWS/utilities/install_tools.sh
+bash install_tools.sh
+```
+
+---
+
+## 4. Terraform Steps
+
+### 4.1 Configure GHCR_TOKEN
+
+### 4.2 Clone the deployment repo
+
+From the Install VM/jumpbox, do:
+
+TODO [may be solved]: how to login without interactive username/password, with GHCR here, otherwise say that token is the password, any username works.
+```bash
+git clone -b ${COMPANY_NAME} --single-branch https://github.com/promethium-ai/promethium-internal-ie-aws.git
+cd promethium-internal-ie-aws
+```
+TODO erase below
+```bash
+git clone https://github.com/promethium-ai/promethium-internal-ie-aws.git
+cd promethium-internal-ie-aws
+git checkout <release_branch>   # provided by Promethium (company name)
+```
+
+---
+
+## 5. Deployment
 
 ### Phase 1 — AWS Infrastructure
 
 Creates the EKS cluster (using the customer-provided cluster and worker roles), OIDC provider, all 6 IRSA roles, EKS node groups, S3 buckets, KMS keys, EFS, and Glue database.
 
 All Promethium clusters are private (`eks_cluster_type = "private"`). Because the EKS API endpoint is VPC-internal, the jumpbox security group must be explicitly authorized to reach it on port 443 **after** the cluster is created but **before** Terraform attempts to configure it. Phase 1 is therefore split into three steps.
-
-TODO: describe this command
-
-```
-sudo su
-```
-
-
-### Github Token
-```bash
-# GitHub tokens
-export GH_TOKEN="<github_pat>"
-export GHCR_TOKEN="<ghcr_token>"
-```
-
-### Login to Helm OCI registry
-
-```bash
-export HELM_EXPERIMENTAL_OCI=1
-helm registry login ghcr.io -u promethium-ai --password-stdin <<< "$GHCR_TOKEN"
-```
 
 #### Phase 1a — Create EKS cluster
 
@@ -265,24 +284,14 @@ terraform apply -target=module.aws.module.eks.aws_eks_cluster.ekscluster
 #### Phase 1b — Authorize jumpbox to cluster API
 
 ```bash
-CLUSTER_SG=$(aws eks describe-cluster \
-  --name promethium-datafabric-prod-<company_name>-eks-cluster \
-  --query 'cluster.resourcesVpcConfig.clusterSecurityGroupId' \
-  --output text --region <aws_region>)
-
-aws ec2 authorize-security-group-ingress \
-  --group-id $CLUSTER_SG \
-  --protocol tcp \
-  --port 443 \
-  --source-group <jumpbox_sg_id> \
-  --region <aws_region>
+CLUSTER_SG=$(aws eks describe-cluster --name promethium-datafabric-prod-${COMPANY_NAME}-eks-cluster --query 'cluster.resourcesVpcConfig.clusterSecurityGroupId' --output text --region ${AWS_REGION})
+aws ec2 authorize-security-group-ingress --group-id $CLUSTER_SG --protocol tcp --port 443 --source-group ${JUMPBOX_SG_ID} --region ${AWS_REGION}
 ```
 
 Verify kubectl connectivity from the jumpbox:
 
 ```bash
-aws eks update-kubeconfig --region <aws_region> \
-  --name promethium-datafabric-prod-<company_name>-eks-cluster
+aws eks update-kubeconfig --region ${AWS_REGION} --name promethium-datafabric-prod-${COMPANY_NAME}-eks-cluster
 kubectl get nodes
 ```
 
@@ -319,61 +328,24 @@ terraform apply
 
 ---
 
-## 5. Post-Install Verification
+## 6. Post-Install Steps
 
-### Get cluster credentials
-
-```bash
-aws eks update-kubeconfig \
-  --name promethium-datafabric-prod-<company_name>-eks-cluster \
-  --region <aws_region>
-```
-
-### Check pods
+### 6.1 Check pods
 
 ```bash
 kubectl get pods -n intelligentedge
-kubectl get pods -n cluster-management
-kubectl get pods -n kube-system   # verify EBS/EFS CSI, LB controller, autoscaler
 ```
 
 All pods should be `Running` or `Completed`. The ingress `ADDRESS` is the internal ALB DNS name — accessible via VPN.
 
-> **Important:** Post-deployment, the Promethium associate must reset the default support user password and update dependent services. See the [post-install credentials runbook](https://pm61data.atlassian.net/wiki/x/AgBfmw).
 
-### Verify OIDC role bindings
+### 6.2 Update support password
 
-Confirm that the IRSA roles Terraform created are correctly bound to Kubernetes service accounts:
-
-```bash
-kubectl get sa ebs-csi-controller-sa -n kube-system -o yaml | grep role-arn
-kubectl get sa efs-csi-controller-sa -n kube-system -o yaml | grep role-arn
-kubectl get sa aws-load-balancer-controller -n kube-system -o yaml | grep role-arn
-kubectl get sa trino-sa -n intelligentedge -o yaml | grep role-arn
-kubectl get sa s3-backup-sa -n intelligentedge -o yaml | grep role-arn
-```
-
-### Check the ALB hostname
-
-```bash
-kubectl get ingress -n intelligentedge
-```
-
-Note the `ADDRESS` field — this is the ALB DNS name to use for DNS records.
-
-### Update DNS
-
-Create CNAME records pointing your Promethium subdomains to the ALB DNS name:
-
-| Record | Value |
-|---|---|
-| `<company_name>.prod.promethium.ai` | `<alb_dns_name>` |
-| `<company_name>-redash.prod.promethium.ai` | `<alb_dns_name>` |
-| `<company_name>-trino.prod.promethium.ai` | `<alb_dns_name>` |
+Post-deployment, the Promethium associate must reset the default support user password and update dependent services. Please follow the [post-install credentials runbook](https://pm61data.atlassian.net/wiki/x/AgBfmw).
 
 ---
 
-## 6. Troubleshooting
+## 7. Troubleshooting
 
 | Symptom | Likely cause | Action |
 |---|---|---|
@@ -390,12 +362,10 @@ Create CNAME records pointing your Promethium subdomains to the ALB DNS name:
 
 ---
 
-## 7. Teardown
+## 8. Teardown
 
 ```bash
-terraform destroy \
-  -target=module.promethium.module.postgres \
-  -var="ghcr_token=$GHCR_TOKEN"
+terraform destroy -target=module.promethium.module.postgres -var="ghcr_token=$GHCR_TOKEN"
 
 terraform destroy -var="ghcr_token=$GHCR_TOKEN"
 ```
