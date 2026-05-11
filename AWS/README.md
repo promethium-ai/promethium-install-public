@@ -29,7 +29,6 @@ This page documents instructions for the customer on how to setup prerequisites 
   - [4. Operational Roles](#4-operational-roles)
   - [5. Verification](#5-verification)
       - [5.1 Verifier Permissions (required before running verifier scripts)](#51-verifier-permissions-required-before-running-verifier-scripts)
-  - [Where `verifier-permissions.json` is the policy JSON saved to a local file.](#where-verifier-permissionsjson-is-the-policy-json-saved-to-a-local-file)
       - [5.2 Verifier Script](#52-verifier-script)
   - [6. Customer Information Required by Promethium](#6-customer-information-required-by-promethium)
     - [AWS Environment](#aws-environment)
@@ -44,7 +43,7 @@ This page documents instructions for the customer on how to setup prerequisites 
 ### How it works
 
 Installing a Promethium Intelligent Edge (IE) cluster requires two parties:
-- The customer will first provide prerequisite AWS infrastructure - VPC, subnets, install VM, install role, and operational IAM roles, etc.
+- The customer will first provide prerequisite AWS infrastructure (by following this page) - VPC, subnets, install VM, install role, and operational IAM roles, etc.
 - The Promethium associate will then deploy the EKS cluster with Terraform, configure OIDC trust policies, and install the full Promethium application stack.
 
 Promethium is always deployed with an **internal load balancer** — accessible via VPN only.
@@ -68,8 +67,6 @@ Once the customer has provided the prerequisite infrastructure and variables, th
 | Promethium Image Tag | Application release version (e.g., `24.2.2`) — provided by Promethium |
 
 ### VPC and Subnet Requirements
-
-Only private subnets are required. No public subnets are needed.
 
 Your VPC must be at least a `/22` CIDR (e.g., `10.0.0.0/22`). Promethium uses an **internal load balancer** — only private subnets are required. No public subnets are needed.
 
@@ -178,19 +175,6 @@ NEW_POLICY=$(echo "$CURRENT_POLICY" | jq --arg arn "$ROLE_ARN" '.Statement += [{
 aws iam update-assume-role-policy --role-name "$ROLE_NAME" --policy-document "$NEW_POLICY"
 ```
 
-
-Wait for completion and record the outputs:
-
-```bash
-aws cloudformation describe-stacks --stack-name promethium-install-role-${COMPANY_NAME} --query "Stacks[0].Outputs" --region ${AWS_REGION}
-```
-
-| Output Key | Description | Used In |
-|---|---|---|
-| `RoleArn` | ARN of the Terraform deployment role | `terraform_assume_role_arn` in tfvars |
-| `InstanceProfileName` | Name of the EC2 instance profile | `jumpbox_instance_profile_name` in tfvars; attach to install VM |
-
-
 ## 2. VPC subnet
 
 - If you don't yet have a VPC with subnets, follow **2.a** and skip **2.b**. 
@@ -291,19 +275,6 @@ aws cloudformation create-stack --stack-name pmie-jumpbox-${COMPANY_NAME} --temp
 
 > ℹ️ Deploy the install role (Section 3) **before** this stack to attach the instance profile automatically via `UseExistingInstanceProfile`.
 
-Wait for completion and record the outputs:
-
-```bash
-aws cloudformation describe-stacks --stack-name pmie-jumpbox-${COMPANY_NAME} --query "Stacks[0].Outputs" --region ${AWS_REGION}
-```
-
-**Outputs to record:**
-
-| Output Key | Description | Used In |
-|---|---|---|
-| `JumpboxInstanceId` | Install VM instance ID | Reference when connecting via SSM |
-| `JumpboxSecurityGroupId` | Jumpbox security group ID | `jumpbox_sg_id` in tfvars |
-
 ### 3.b Option B - Attach the instance profile to your provided install VM
 
 ```bash
@@ -327,12 +298,6 @@ aws cloudformation create-stack --stack-name promethium-eks-base-roles-${COMPANY
 ```
 
 ---
-
-Whichever option you chose, wait for completion and record the outputs:
-
-```bash
-aws cloudformation describe-stacks --stack-name promethium-eks-base-roles-${COMPANY_NAME} --query "Stacks[0].Outputs" --region ${AWS_REGION}
-```
 
 This creates all 8 operational roles (all names are suffixed with `${COMPANY_NAME}`):
 
@@ -361,7 +326,6 @@ This creates all 8 operational roles (all names are suffixed with `${COMPANY_NAM
 | `GlueTrinoServiceRoleArn` | `trino_oidc_role_arn` in tfvars |
 
 ---
-
 
 ## 5. Verification
 
@@ -460,10 +424,13 @@ aws iam put-user-policy \
 ```
 
 Where `verifier-permissions.json` is the policy JSON saved to a local file.
+
 ---
 
 #### 5.2 Verifier Script
 
+
+TODO: changes must be in main before this can happen
 ```bash
 curl -O https://raw.githubusercontent.com/promethium-ai/promethium-install-public/main/AWS/utilities/verify_install_role.sh
 chmod +x verify_install_role.sh
