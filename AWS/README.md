@@ -68,7 +68,7 @@ Once the customer has provided the prerequisite infrastructure and variables, th
 
 ### VPC and Subnet Requirements
 
-Your VPC must be at least a `/22` CIDR (e.g., `10.0.0.0/22`). Promethium uses an **internal load balancer** — only private subnets are required. No public subnets are needed.
+Your VPC must be at least a `/22` CIDR (e.g., `10.0.0.0/22`). Promethium uses an **internal load balancer** — only private subnets are required for the application and ALB. EKS nodes do require outbound internet access (e.g. via NAT Gateway), but how that egress is provided is up to you.
 
 | Configuration | Private Subnets | AZs | Routing | Required Tags |
 |---|---|---|---|---|
@@ -189,12 +189,12 @@ The template is located at [`AWS/CFT/network.yaml`](CFT/network.yaml) in this re
 #### What it creates
 
 - VPC with configurable CIDR
-- 3 private subnets (NAT Gateway routing) — for EKS nodes
-- 1 public subnets (for VPN access)
+- 3 private subnets — for EKS nodes (outbound routed via NAT Gateway)
+- 1 public subnet — hosts NAT Gateway
 - Internet Gateway and NAT Gateway
 - Route tables and associations
 
-> This CFT tags the private subnets so that we only have an internal ALB. The one public subnet (for NAT GW) here allows access over VPN/Direct Connect, not the public internet.
+> This CFT tags the private subnets for internal ALB use only. The public subnet exists solely to host the NAT Gateway, which provides outbound internet access for EKS nodes — no application traffic is exposed to the public internet.
 
 #### Deploy the network stack
 
@@ -273,7 +273,7 @@ SUBNET1_ID=$(aws cloudformation describe-stacks --stack-name "pmie-network-${COM
 aws cloudformation create-stack --stack-name pmie-jumpbox-${COMPANY_NAME} --template-body file://AWS/CFT/jumpbox.yaml --parameters ParameterKey=VpcId,ParameterValue=${VPC_ID} ParameterKey=PrivateSubnet1Id,ParameterValue=${SUBNET1_ID} ParameterKey=JumpboxName,ParameterValue=${COMPANY_NAME}-jumpbox ParameterKey=UseExistingInstanceProfile,ParameterValue=PromethiumDeploymentRole-${COMPANY_NAME}InstanceProfile --region ${AWS_REGION}
 ```
 
-> ℹ️ Deploy the install role (Section 3) **before** this stack to attach the instance profile automatically via `UseExistingInstanceProfile`.
+> ℹ️ Deploy the install role (Section 1) **before** this stack to attach the instance profile automatically via `UseExistingInstanceProfile`.
 
 ### 3.b Option B - Attach the instance profile to your provided install VM
 
@@ -429,8 +429,6 @@ Where `verifier-permissions.json` is the policy JSON saved to a local file.
 
 #### 5.2 Verifier Script
 
-
-TODO: changes must be in main before this can happen
 ```bash
 curl -O https://raw.githubusercontent.com/promethium-ai/promethium-install-public/main/AWS/utilities/verify_install_role.sh
 chmod +x verify_install_role.sh
@@ -449,15 +447,15 @@ chmod +x verify_operational_roles.sh
 ./verify_operational_roles.sh ${COMPANY_NAME} ${AWS_REGION} promethium-eks-base-roles-${COMPANY_NAME}
 ```
 
-Once verification is done, you may remove the trust policy it:
+Once verification is done, you may remove the trust policy:
 
-If you are using an IAM role:
+If you are using an **IAM role**:
 ```bash
 CUSTOMER_ROLE_NAME="<your-iam-role-name>"  # Fill in: your IAM role name
 aws iam delete-role-policy --role-name ${CUSTOMER_ROLE_NAME} --policy-name promethium-verifier-policy
 ```
 
-If you are using an IAM user:
+If you are using an **IAM user**:
 ```bash
 CUSTOMER_USER_NAME="<your-iam-user-name>"  # Fill in: your IAM user name
 aws iam delete-user-policy --user-name ${CUSTOMER_USER_NAME} --policy-name promethium-verifier-policy
