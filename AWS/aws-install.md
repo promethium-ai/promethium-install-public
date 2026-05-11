@@ -9,20 +9,19 @@ Promethium is deployed with an **internal load balancer** — accessible via VPN
 - [Promethium Intelligent Edge AWS Installation (Promethium Associate)](#promethium-intelligent-edge-aws-installation-promethium-associate)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
-  - [Setup: Connect to the Install VM and Load Variables](#setup-connect-to-the-install-vm-and-load-variables)
   - [0. Create Customer Branch](#0-create-customer-branch)
-    - [Github Token](#github-token)
-    - [Login to Helm OCI registry](#login-to-helm-oci-registry)
-    - [0.1 Configure `backend.tf`](#01-configure-backendtf)
-    - [0.2 Create `terraform.tfvars`](#02-create-terraformtfvars)
-  - [1. Grant Cross-Account Trust](#1-grant-cross-account-trust)
-  - [2. Verification (optional)](#2-verification-optional)
-      - [2.1 Verifier Permissions (required before running verifier scripts)](#21-verifier-permissions-required-before-running-verifier-scripts)
-      - [2.2 Verifier Steps (Promethium Associate)](#22-verifier-steps-promethium-associate)
-  - [3. Tool Installation](#3-tool-installation)
-  - [4. Terraform Steps](#4-terraform-steps)
-    - [4.1 Configure GHCR\_TOKEN](#41-configure-ghcr_token)
-    - [4.2 Clone the deployment repo](#42-clone-the-deployment-repo)
+  - [1. Setup: Connect to the Install VM and Load Variables](#1-setup-connect-to-the-install-vm-and-load-variables)
+    - [1.1 Tool Installation](#11-tool-installation)
+    - [1.2 Github Token](#12-github-token)
+    - [1.3 Login to Helm OCI registry](#13-login-to-helm-oci-registry)
+  - [2. Configure Terraform Branch](#2-configure-terraform-branch)
+    - [2.1 Clone the deployment repo](#21-clone-the-deployment-repo)
+    - [2.2 Configure `backend.tf`](#22-configure-backendtf)
+    - [2.3 Create `terraform.tfvars`](#23-create-terraformtfvars)
+  - [3. Grant Cross-Account Trust](#3-grant-cross-account-trust)
+  - [4. Verification (optional)](#4-verification-optional)
+      - [4.1 Verifier Permissions (required before running verifier scripts)](#41-verifier-permissions-required-before-running-verifier-scripts)
+      - [4.2 Verifier Steps (Promethium Associate)](#42-verifier-steps-promethium-associate)
   - [5. Deployment](#5-deployment)
     - [Phase 1 — AWS Infrastructure](#phase-1--aws-infrastructure)
       - [Phase 1a — Create EKS cluster](#phase-1a--create-eks-cluster)
@@ -55,9 +54,9 @@ Promethium is deployed with an **internal load balancer** — accessible via VPN
 
 # Installation
 
-## Setup: Connect to the Install VM and Load Variables
+## 0. Create Customer Branch
 
-All commands in this guide are run from the **install VM (jumpbox)**. Connect to it via **AWS Console → EC2 → Instances → select the jumpbox → Connect → Session Manager**.
+> ⚠️ **Run this on your local machine**, not the jumpbox — this is the only step in the guide that is not run on the install VM.
 
 Copy `promethium-outputs-<company_name>.sh` (generated in [README.md Section 6](README.md#6-customer-information-required-by-promethium)) to the jumpbox, then source it at the start of each session:
 
@@ -67,12 +66,7 @@ Copy `promethium-outputs-<company_name>.sh` (generated in [README.md Section 6](
 source promethium-outputs-<company_name>.sh
 ```
 
----
-
-## 0. Create Customer Branch
-
-> ⚠️ **Run this on your local machine**, not the jumpbox — this is the only step in the guide that is not run on the install VM.
-
+Create the customer branch:
 ```bash
 git clone https://github.com/promethium-ai/promethium-internal-ie-aws.git
 cd promethium-internal-ie-aws
@@ -81,19 +75,48 @@ git checkout -b ${COMPANY_NAME}
 git push -u origin ${COMPANY_NAME}
 ```
 
-### Github Token
+## 1. Setup: Connect to the Install VM and Load Variables
 
-> Replace `<github_pat>` and `<ghcr_token>` with the values provided by Promethium.
+All following commands in this guide are run from the **install VM (jumpbox)** (unless explicitly stated). Connect to it via **AWS Console → EC2 → Instances → select the jumpbox → Connect → Session Manager**.
+
+First run as root and get into the default directory `/root`:
+```bash
+sudo su
+cd
+```
+
+> The rest of the jumpbox commands must be run in this `/root` environment.
+
+Copy `promethium-outputs-<company_name>.sh` (generated in [README.md Section 6](README.md#6-customer-information-required-by-promethium)) to the jumpbox, then source it at the start of each session:
+
+> Replace `<company_name>` with the customer's company name before running.
+
+```bash
+source promethium-outputs-<company_name>.sh
+```
+---
+
+### 1.1 Tool Installation
+
+We need to install tools like git. In the install VM, run:
+
+```bash
+curl -O https://raw.githubusercontent.com/promethium-ai/promethium-install-public/main/AWS/utilities/install_tools.sh
+bash install_tools.sh
+```
+
+### 1.2 Github Token
+
+> Replace `<github_pat>` and `<ghcr_token>` with the Github PAT values provided by Promethium.
 
 ```bash
 # GitHub tokens
 export GH_TOKEN="<github_pat>"
 export GHCR_TOKEN="<ghcr_token>"
-# TODO: this may take care of authentication/password
 git config --global url."https://${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
 ```
 
-### Login to Helm OCI registry
+### 1.3 Login to Helm OCI registry
 
 ```bash
 # TODO research this
@@ -101,7 +124,18 @@ export HELM_EXPERIMENTAL_OCI=1
 helm registry login ghcr.io -u promethium-ai --password-stdin <<< "$GHCR_TOKEN"
 ```
 
-### 0.1 Configure `backend.tf`
+## 2. Configure Terraform Branch
+
+### 2.1 Clone the deployment repo
+
+From the Install VM/jumpbox, do:
+
+```bash
+git clone -b ${COMPANY_NAME} --single-branch https://github.com/promethium-ai/promethium-internal-ie-aws.git
+cd promethium-internal-ie-aws
+```
+
+### 2.2 Configure `backend.tf`
 
 ```bash
 cat > backend.tf << EOF
@@ -115,9 +149,9 @@ terraform {
 EOF
 ```
 
-### 0.2 Create `terraform.tfvars`
+### 2.3 Create `terraform.tfvars`
 
-> After running, replace `<image_tag>` in `terraform.tfvars` with the Promethium release version provided by Promethium.
+> Before/After running, you must also manually replace `<image_tag>` in `terraform.tfvars` with the Promethium release version provided by Promethium.
 
 ```bash
 cat > terraform.tfvars << EOF
@@ -180,9 +214,9 @@ EOF
 
 > ⚠️ **`subnet_ids` must contain only private subnets.** EKS worker nodes are placed in these subnets. Public subnets auto-assign public IPs to instances and will cause the node group to fail.
 
-## 1. Grant Cross-Account Trust
+## 3. Grant Cross-Account Trust
 
-> ⚠️ **This step is performed by Promethium**, not the customer. It must be completed before Terraform runs.
+> These commands must be run from your local machine where your AWS is authenticated, not from the install VM / jumpbox
 
 Promethium's two internal accounts need to trust the customer's deployment role so that:
 - The S3 Terraform state backend can be accessed (account `734236616923`)
@@ -201,9 +235,11 @@ aws iam update-assume-role-policy --role-name promethium-terraform-saas-assume-r
 ```
 ---
 
-## 2. Verification (optional)
+## 4. Verification (optional)
 
-#### 2.1 Verifier Permissions (required before running verifier scripts)
+#### 4.1 Verifier Permissions (required before running verifier scripts)
+
+> This command must be run from your local machine where your AWS is authenticated, not from the install VM / jumpbox
 
 Run the following if the customer has not run verification or something went wrong with their verification.
 
@@ -215,51 +251,13 @@ aws cloudformation create-stack --stack-name promethium-verifier-policy --templa
 
 > This policy grants read-only access to CloudFormation, IAM, and EKS — used only by the verifier scripts. It can be removed after the install is complete.
 
-#### 2.2 Verifier Steps (Promethium Associate)
+#### 4.2 Verifier Steps (Promethium Associate)
 
-First run as root and get into the default directory `/root`:
-```bash
-sudo su
-cd
-```
-The rest of the jumpbox commands must be run in this `/root` environment.
+> The following command must be run inside the install VM / jumpbox, in the `/root` environment.
 
 ```bash
 curl -O https://raw.githubusercontent.com/promethium-ai/promethium-install-public/main/AWS/utilities/verify_cross_account_trust.sh
 bash verify_cross_account_trust.sh PromethiumDeploymentRole-${COMPANY_NAME} ${AWS_REGION}
-```
-
-## 3. Tool Installation
-
-SSH or SSM into the install VM, then run:
-
-```bash
-sudo su
-cd
-curl -O https://raw.githubusercontent.com/promethium-ai/promethium-install-public/main/AWS/utilities/install_tools.sh
-bash install_tools.sh
-```
-
----
-
-## 4. Terraform Steps
-
-### 4.1 Configure GHCR_TOKEN
-
-### 4.2 Clone the deployment repo
-
-From the Install VM/jumpbox, do:
-
-TODO [may be solved]: how to login without interactive username/password, with GHCR here, otherwise say that token is the password, any username works.
-```bash
-git clone -b ${COMPANY_NAME} --single-branch https://github.com/promethium-ai/promethium-internal-ie-aws.git
-cd promethium-internal-ie-aws
-```
-TODO erase below
-```bash
-git clone https://github.com/promethium-ai/promethium-internal-ie-aws.git
-cd promethium-internal-ie-aws
-git checkout <release_branch>   # provided by Promethium (company name)
 ```
 
 ---
