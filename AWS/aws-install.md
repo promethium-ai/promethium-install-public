@@ -100,6 +100,7 @@ source promethium-outputs-<company_name>.sh
 
 We need to install tools like git. In the install VM, run:
 
+TODO: For all curl commands, changes must be merged to main before this can happen as written, else the branch needs to change to AWS_installs_fixes
 ```bash
 curl -O https://raw.githubusercontent.com/promethium-ai/promethium-install-public/main/AWS/utilities/install_tools.sh
 bash install_tools.sh
