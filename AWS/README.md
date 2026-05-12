@@ -35,7 +35,7 @@ This page documents instructions for the customer on how to setup prerequisites 
     - [VPC and Subnets](#vpc-and-subnets)
     - [Install VM](#install-vm)
     - [Provided by Promethium](#provided-by-promethium)
-  - [7. Additional Resources](#7-additional-resources)
+  - [7. Resources](#7-resources)
 
 ---
 # Overview
@@ -162,7 +162,7 @@ Create the IAM role and EC2 instance profile that Terraform uses to provision in
 aws cloudformation create-stack --stack-name promethium-install-role-${COMPANY_NAME} --template-body file://AWS/CFT/install_role.yaml --parameters ParameterKey=PromethiumInstallRole,ParameterValue=PromethiumDeploymentRole-${COMPANY_NAME} --capabilities CAPABILITY_NAMED_IAM --region ${AWS_REGION}
 ```
 
-Then run the following command in your AWS-authenticated terminal to allow the role to assume itself (allowing terraform on EC2 to chain credential sessions):
+Wait for the stack to complete successfully, then run the following command in your AWS-authenticated terminal to allow the role to assume itself (allowing terraform on EC2 to chain credential sessions):
 ```bash
 STACK_NAME="promethium-install-role-${COMPANY_NAME}"
 ROLE_ARN=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query 'Stacks[0].Outputs[?OutputKey==`RoleArn`].OutputValue' --output text)
@@ -202,24 +202,6 @@ The template is located at [`AWS/CFT/network.yaml`](CFT/network.yaml) in this re
 aws cloudformation create-stack --stack-name pmie-network-${COMPANY_NAME} --template-body file://AWS/CFT/network.yaml --parameters ParameterKey=VpcName,ParameterValue=${COMPANY_NAME}-vpc ParameterKey=VpcCidrBlock,ParameterValue=10.0.0.0/22 ParameterKey=EksClusterName,ParameterValue=promethium-datafabric-prod-${COMPANY_NAME}-eks-cluster --region ${AWS_REGION}
 ```
 
-> If you are using your own EKS Cluster, you can replace the `ParameterValue` for `ParameterKey=EksClusterName,ParameterValue=promethium-datafabric-prod-${COMPANY_NAME}-eks-cluster`
-
-Wait for completion and note the outputs:
-
-```bash
-aws cloudformation describe-stacks --stack-name pmie-network-${COMPANY_NAME} --query "Stacks[0].Outputs" --region ${AWS_REGION}
-```
-
-**Outputs to record:**
-
-| Output Key | Used In |
-|---|---|
-| `VpcId` | `vpc_info.vpc_id` in tfvars; required input for jumpbox stack |
-| `Subnet1Id` | `vpc_info.subnet_ids` (private); required input for jumpbox stack |
-| `Subnet2Id` | `vpc_info.subnet_ids` (private) |
-| `Subnet3Id` | `vpc_info.subnet_ids` (private) |
-| `Subnet4Id` | public subnet, NAT Gateway only (not used in tfvars) |
-
 ---
 
 ### 2.b Option B — Tag Your Existing Subnets
@@ -243,6 +225,20 @@ for SUBNET_ID in ${PRIVATE_SUBNET_IDS}; do
   aws ec2 create-tags --resources $SUBNET_ID --region $REGION --tags Key="kubernetes.io/cluster/${CLUSTER_NAME}",Value=owned Key="kubernetes.io/role/internal-elb",Value=1
 done
 ```
+
+Then, note the following variables from your self-provided VPC:
+
+**Outputs to record:**
+
+| Output Key | Used In |
+|---|---|
+| `VpcId` | `vpc_info.vpc_id` in tfvars; required input for jumpbox stack |
+| `VpcCidrBlock` | `vpc_info.vpc_cidr` in tfvars |
+| `Subnet1Id` | `vpc_info.subnet_ids` (private); required input for jumpbox stack |
+| `Subnet2Id` | `vpc_info.subnet_ids` (private) |
+| `Subnet3Id` | `vpc_info.subnet_ids` (private) |
+
+
 ---
 
 ## 3. Jumpbox
@@ -263,13 +259,18 @@ The template is located at [`AWS/CFT/jumpbox.yaml`](CFT/jumpbox.yaml).
 
 #### Deploy the jumpbox stack
 
+> NOTE: if you provided your own VPC (option 2.b), set `VPC_ID="<your-vpc-id>"` and `SUBNET1_ID="<your-private-subnet-id>"` from the values you noted in section 2.b (`VpcId` and `Subnet1Id`).
+
 ```bash
-# From Promethium network CFT (Option A):
+# If using Promethium network CFT (Option 2.a):
 VPC_ID=$(aws cloudformation describe-stacks --stack-name "pmie-network-${COMPANY_NAME}" --query 'Stacks[0].Outputs[?OutputKey==`VpcId`].OutputValue' --output text --region ${AWS_REGION})
 SUBNET1_ID=$(aws cloudformation describe-stacks --stack-name "pmie-network-${COMPANY_NAME}" --query 'Stacks[0].Outputs[?OutputKey==`Subnet1Id`].OutputValue' --output text --region ${AWS_REGION})
-# If using your own VPC (Option B), set these manually instead:
+
+# If using your own VPC (Option 2.b), set these manually and uncomment them instead of above:
+
 # VPC_ID="<your-vpc-id>"
 # SUBNET1_ID="<your-private-subnet-id>"
+
 aws cloudformation create-stack --stack-name pmie-jumpbox-${COMPANY_NAME} --template-body file://AWS/CFT/jumpbox.yaml --parameters ParameterKey=VpcId,ParameterValue=${VPC_ID} ParameterKey=PrivateSubnet1Id,ParameterValue=${SUBNET1_ID} ParameterKey=JumpboxName,ParameterValue=${COMPANY_NAME}-jumpbox ParameterKey=UseExistingInstanceProfile,ParameterValue=PromethiumDeploymentRole-${COMPANY_NAME}InstanceProfile --region ${AWS_REGION}
 ```
 
@@ -282,6 +283,14 @@ INSTALL_VM_INSTANCE_ID="<your-ec2-instance-id>"  # Fill in: your existing EC2 in
 INSTANCE_PROFILE_NAME=$(aws cloudformation describe-stacks --stack-name "promethium-install-role-${COMPANY_NAME}" --query 'Stacks[0].Outputs[?OutputKey==`InstanceProfileName`].OutputValue' --output text --region ${AWS_REGION})
 aws ec2 associate-iam-instance-profile --instance-id ${INSTALL_VM_INSTANCE_ID} --iam-instance-profile Name=${INSTANCE_PROFILE_NAME} --region ${AWS_REGION}
 ```
+
+Record the following variables for your self-provided jumpbox / install VM.
+
+| Output Key | Used In |
+|---|---|
+| `JumpboxInstanceId` | Install VM instance ID |
+| `JumpboxSecurityGroupId` | `jumpbox_sg_id` in tfvars |
+
 
 ---
 
@@ -312,7 +321,7 @@ This creates all 8 operational roles (all names are suffixed with `${COMPANY_NAM
 | `promethium-prod-pg-backup-role-${COMPANY_NAME}` | Postgres backup | Allows postgres backups to be written to S3 and container images to be pulled from ECR |
 | `promethium-prod-glue-trino-role-${COMPANY_NAME}` | Trino / Glue crawlers | Allows Trino to query and manage data in Glue Data Catalog and S3, handle KMS-encrypted data, and interact with Glue jobs |
 
-**Outputs to record:**
+**Outputs:**
 
 | Output Key | Used In |
 |---|---|
@@ -465,7 +474,7 @@ aws iam delete-user-policy --user-name ${CUSTOMER_USER_NAME} --policy-name prome
 
 ## 6. Customer Information Required by Promethium
 
-Run the following command to collect all stack outputs into a shell script and send the file to your Promethium associate:
+Run the following command to collect all outputs from CFT Stacks you created so far into a file: `promethium-outputs-${COMPANY_NAME}.sh`. If you opted to provide your own IAC instead of using provided CFTs for at least one of VPC or Install VM / Jumpbox, the corresponding variable in `promethium-outputs-${COMPANY_NAME}.sh` will be an empty string, and you must supply the value yourself by editing the file after it is created.
 
 ```bash
 {
@@ -539,10 +548,11 @@ The following sections describe the outputs collected above.
 
 ---
 
-## 7. Additional Resources
+## 7. Resources
 
 | Resource | Description |
 |----------|-------------|
+| [AWS Install Guide (pre-call)](aws-install-pre-call.md) | Step-by-step installation guide for Promethium associates before installing on-call |
 | [AWS Install Guide](aws-install.md) | Step-by-step installation guide for Promethium associates |
 | [Install Role CFT](CFT/install_role.yaml) | Creates the Terraform deployment role and instance profile |
 | [Verifier Policy CFT](CFT/verifier_policy.yaml) | Adds read-only permissions for running pre-install verifier scripts from the jumpbox |

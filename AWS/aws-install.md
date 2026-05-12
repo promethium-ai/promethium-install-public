@@ -74,7 +74,7 @@ source promethium-outputs-<company_name>.sh
 
 ### 1.1 Tool Installation
 
-We need to install tools like git. In the install VM, run:
+Install required tools (Terraform, kubectl, Helm, git, jq) on the install VM:
 
 ```bash
 curl -O https://raw.githubusercontent.com/promethium-ai/promethium-install-public/main/AWS/utilities/install_tools.sh

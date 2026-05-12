@@ -48,7 +48,7 @@ EOF
 
 ### 2.2 Create `terraform.tfvars`
 
-> Before/After running, you must also manually replace `<image_tag>` in `terraform.tfvars` with the Promethium release version provided by Promethium.
+> After running the following command, replace `<image_tag>` in `terraform.tfvars` with the Promethium release version provided by Promethium.
 
 ```bash
 cat > terraform.tfvars << EOF
@@ -95,7 +95,7 @@ jumpbox_sg_id                 = "${JUMPBOX_SG_ID}"
 jumpbox_instance_profile_name = "${INSTANCE_PROFILE_NAME}"
 
 # ── Promethium application ────────────────────────────────────────────────────
-promethium_image_tag = "<image_tag>"   # e.g. 24.2.2
+promethium_image_tag = "<image_tag>" # <-- REPLACE HERE e.g. 24.2.2
 
 # ── Tagging ───────────────────────────────────────────────────────────────────
 default_tags = {
