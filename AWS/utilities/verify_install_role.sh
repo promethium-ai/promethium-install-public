@@ -51,24 +51,9 @@ else
   check_pass "Instance profile exists: ${PROFILE}"
 fi
 
-# ── 3. Trust policy ───────────────────────────────────────────────────────────
-# NOTE: commented out for now since trust policy is updated by promethium associate, it won't be there when the customer finishes their steps
-
-# echo ""
-# echo "── 3. Trust policy"
-# TRUST=$(echo "$ROLE_JSON" | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin)['Role']['AssumeRolePolicyDocument']))")
-# 
-# echo "$TRUST" | grep -q "ec2.amazonaws.com" \
-#   && check_pass "Trusts ec2.amazonaws.com (required for instance profile)" \
-#   || check_fail "Trusts ec2.amazonaws.com" "MISSING — instance profile won't work"
-# 
-# echo "$TRUST" | grep -q "$ROLE_NAME" \
-#   && check_pass "Self-trust present (role can assume itself)" \
-#   || check_fail "Self-trust" "MISSING — terraform init will fail; must add before deploy"
-
-# ── 4. Managed policies ────────────────────────────────────────────────────────
+# ── 3. Managed policies ────────────────────────────────────────────────────────
 echo ""
-echo "── 4. Managed policies"
+echo "── 3. Managed policies"
 POLICIES=$(aws iam list-attached-role-policies --role-name "$ROLE_NAME" \
   --query 'AttachedPolicies[*].PolicyName' --output text 2>/dev/null)
 
@@ -87,9 +72,9 @@ for EXPECTED in \
     || check_warn "$EXPECTED" "not found — may cause failures during apply"
 done
 
-# ── 5. STS cross-account targets ──────────────────────────────────────────────
+# ── 4. STS cross-account targets ──────────────────────────────────────────────
 echo ""
-echo "── 5. STS cross-account permissions"
+echo "── 4. STS cross-account permissions"
 
 # Build combined policy document text from all attached managed policies (reused in section 7)
 COMBINED_ALL=""
@@ -120,46 +105,9 @@ echo "$COMBINED_STS" | grep -q "sts:GetServiceBearerToken" \
         --policy-name promethium-terraform-sts-patch \\
         --policy-document '{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"sts:GetServiceBearerToken\"],\"Resource\":\"*\"}]}'"; }
 
-# ── 5b. Cross-account trust (live test) ───────────────────────────────────────
-# echo ""
-# echo "── 5b. Cross-account trust — live assume-role test"
-# echo "    (First assumes ${ROLE_NAME}, then tests cross-account trust from that identity)"
-# 
-# # First assume the deployment role itself to get its credentials
-# DEPLOY_CREDS=$(aws sts assume-role \
-#   --role-arn "$ROLE_ARN" \
-#   --role-session-name "verify-${COMPANY}-crossaccount" \
-#   --duration-seconds 900 \
-#   --output json 2>&1)
-# 
-# if ! echo "$DEPLOY_CREDS" | python3 -c "import sys,json; json.load(sys.stdin)['Credentials']" 2>/dev/null; then
-#   check_warn "Cross-account trust test" "Cannot assume ${ROLE_NAME} from current caller — run this script from the jumpbox instance profile for accurate results. Verify trust policy manually in each Promethium account."
-# else
-#   DEPLOY_KEY=$(echo "$DEPLOY_CREDS" | python3 -c "import sys,json; print(json.load(sys.stdin)['Credentials']['AccessKeyId'])")
-#   DEPLOY_SECRET=$(echo "$DEPLOY_CREDS" | python3 -c "import sys,json; print(json.load(sys.stdin)['Credentials']['SecretAccessKey'])")
-#   DEPLOY_TOKEN=$(echo "$DEPLOY_CREDS" | python3 -c "import sys,json; print(json.load(sys.stdin)['Credentials']['SessionToken'])")
-# 
-#   for ACCT in 734236616923 308611924187; do
-#     RESULT=$(AWS_ACCESS_KEY_ID="$DEPLOY_KEY" \
-#       AWS_SECRET_ACCESS_KEY="$DEPLOY_SECRET" \
-#       AWS_SESSION_TOKEN="$DEPLOY_TOKEN" \
-#       aws sts assume-role \
-#         --role-arn "arn:aws:iam::${ACCT}:role/promethium-terraform-saas-assume-role" \
-#         --role-session-name "verify-${COMPANY}" \
-#         --duration-seconds 900 \
-#         --query 'Credentials.AccessKeyId' \
-#         --output text 2>&1)
-#     if echo "$RESULT" | grep -q "^ASIA\|^AKIA"; then
-#       check_pass "Cross-account trust OK — ${ACCT} trusts ${ROLE_NAME}"
-#     else
-#       check_fail "Cross-account trust — ${ACCT}" "MISSING — Promethium must add ${ROLE_NAME} to promethium-terraform-saas-assume-role trust policy in ${ACCT}"
-#     fi
-#   done
-# fi
-
-# ── 6. Managed policies ───────────────────────────────────────────────────────
+# ── 5. Managed policies ───────────────────────────────────────────────────────
 echo ""
-echo "── 6. Managed policies"
+echo "── 5. Managed policies"
 MANAGED=$(aws iam list-attached-role-policies --role-name "$ROLE_NAME" \
   --query 'AttachedPolicies[*].PolicyName' --output text 2>/dev/null)
 
@@ -167,9 +115,9 @@ echo "$MANAGED" | grep -q "AmazonSSMManagedInstanceCore" \
   && check_pass "AmazonSSMManagedInstanceCore" \
   || check_warn "AmazonSSMManagedInstanceCore" "MISSING — SSM session access won't work"
 
-# ── 7. IAM permissions ────────────────────────────────────────────────────────
+# ── 6. IAM permissions ────────────────────────────────────────────────────────
 echo ""
-echo "── 7. IAM permissions"
+echo "── 6. IAM permissions"
 COMBINED_IAM="$COMBINED_ALL"
 
 # Check iam:PassRole and iam:GetRole scoped to IAM role resources (not just EKS ARNs)

@@ -1,24 +1,25 @@
 # Promethium Intelligent Edge AWS Installation (Promethium Associate)
 
-This page documents instructions for the Promethium associate on completing the AWS install, once the customer completes prerequisites ([`README.md`](README.md)), and the Promethium associate completes the pre-call instructions to create a branch ([aws-install-pre-call.md](aws-install-pre-call.md)).
+This page documents instructions on completing the AWS install, once the customer completes prerequisites ([`README.md`](README.md)), and the Promethium associate completes the pre-call instructions to create and configure the tenant's branch ([aws-install-pre-call.md](aws-install-pre-call.md)) in the Github deployment repository `promethium-internal-ie-aws`.
 
 The customer provides an existing VPC (with subnets and routing), an EC2 install VM/jumpbox, the Terraform install role (`install_role.yaml`), and all operational IAM roles (`operational_roles.yaml`). Promethium's Terraform creates the EKS cluster, configures OIDC trust policies, deploys EKS add-ons, and installs the full Promethium application stack.
 
-Promethium is deployed with an **internal load balancer** — accessible via VPN only.
+> Promethium is deployed with an **internal load balancer** — accessible via VPN only.
 
 - [Promethium Intelligent Edge AWS Installation (Promethium Associate)](#promethium-intelligent-edge-aws-installation-promethium-associate)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
-  - [1. Setup: Connect to the Install VM and Load Variables](#1-setup-connect-to-the-install-vm-and-load-variables)
+  - [1. Setup: Connect to the Install VM and configure the environment](#1-setup-connect-to-the-install-vm-and-configure-the-environment)
     - [1.1 Tool Installation](#11-tool-installation)
     - [1.2 Github Token](#12-github-token)
     - [1.3 Login to Helm OCI registry](#13-login-to-helm-oci-registry)
   - [2. Configure Terraform Branch](#2-configure-terraform-branch)
     - [2.1 Clone the deployment repo](#21-clone-the-deployment-repo)
+    - [2.2 Source all customer outputs](#22-source-all-customer-outputs)
   - [3. Grant Cross-Account Trust](#3-grant-cross-account-trust)
-  - [4. Verification (optional)](#4-verification-optional)
+  - [4. Verify Cross-Account Trust (optional)](#4-verify-cross-account-trust-optional)
       - [4.1 Verifier Permissions (required before running verifier scripts)](#41-verifier-permissions-required-before-running-verifier-scripts)
-      - [4.2 Verifier Steps (Promethium Associate)](#42-verifier-steps-promethium-associate)
+      - [4.2 Verifier Steps](#42-verifier-steps)
   - [5. Deployment](#5-deployment)
     - [Phase 1 — AWS Infrastructure](#phase-1--aws-infrastructure)
       - [Phase 1a — Create EKS cluster](#phase-1a--create-eks-cluster)
@@ -51,9 +52,11 @@ Promethium is deployed with an **internal load balancer** — accessible via VPN
 
 # Installation
 
-## 1. Setup: Connect to the Install VM and Load Variables
+> ⚠️ Unless explicitly stated, all of the commands in this guide shall run from the **Install VM / Jumpbox**. ⚠️
 
-All following commands in this guide are run from the **install VM (jumpbox)** (unless explicitly stated). Connect to it via **AWS Console → EC2 → Instances → select the jumpbox → Connect → Session Manager**.
+## 1. Setup: Connect to the Install VM and configure the environment 
+
+Connect to the Install VM via SSM: **AWS Console → EC2 → Instances → select the jumpbox → Connect → Session Manager**.
 
 First run as root and get into the default directory `/root`:
 ```bash
@@ -138,15 +141,13 @@ aws iam update-assume-role-policy --role-name promethium-terraform-saas-assume-r
 ```
 ---
 
-## 4. Verification (optional)
+## 4. Verify Cross-Account Trust (optional)
 
 #### 4.1 Verifier Permissions (required before running verifier scripts)
 
-> This command must be run from your local machine where your AWS is authenticated, not from the install VM / jumpbox
+> ⚠️ This command must be run from your local machine where your AWS CLI is authenticated, **NOT** from the Install VM / Jumpbox ⚠️
 
-Run the following if the customer has not run verification or something went wrong with their verification.
-
-Before running the Promethium pre-install verifier scripts on the install VM/jumpbox, deploy [`CFT/verifier_policy.yaml`](CFT/verifier_policy.yaml) to add the necessary read-only permissions to the install role:
+Before running the Promethium pre-install verifier scripts on the Install VM / Jumpbox, deploy [`CFT/verifier_policy.yaml`](CFT/verifier_policy.yaml) to add the necessary read-only permissions to the install role:
 
 ```bash
 aws cloudformation create-stack --stack-name promethium-verifier-policy-${COMPANY_NAME} --template-body file://AWS/CFT/verifier_policy.yaml --parameters ParameterKey=PromethiumInstallRole,ParameterValue=PromethiumDeploymentRole-${COMPANY_NAME} --capabilities CAPABILITY_NAMED_IAM --region ${AWS_REGION}
@@ -154,9 +155,9 @@ aws cloudformation create-stack --stack-name promethium-verifier-policy-${COMPAN
 
 > This policy grants read-only access to CloudFormation, IAM, and EKS — used only by the verifier scripts. It can be removed after the install is complete.
 
-#### 4.2 Verifier Steps (Promethium Associate)
+#### 4.2 Verifier Steps
 
-> The following command must be run inside the install VM / jumpbox, in the `/root` environment.
+> The following command must be run inside the Install VM / Jumpbox in the `/root` environment.
 
 ```bash
 curl -O https://raw.githubusercontent.com/promethium-ai/promethium-install-public/main/AWS/utilities/verify_cross_account_trust.sh
@@ -267,6 +268,8 @@ The AWS install is now complete.
 ---
 
 ## Teardown
+
+The following command will delete the resources provisioned by the earlier `terraform apply` steps.
 
 ```bash
 terraform destroy -target=module.promethium.module.postgres -var="ghcr_token=$GHCR_TOKEN"
