@@ -9,9 +9,9 @@ Parameters:
 
 Resources:
   VerifierPolicy:
-    Type: AWS::IAM::Policy
+    Type: AWS::IAM::ManagedPolicy
     Properties:
-      PolicyName: promethium-verifier-policy
+      ManagedPolicyName: !Sub '${PromethiumInstallRole}-verifier-policy'
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -35,10 +35,7 @@ Resources:
       Roles:
         - !Ref PromethiumInstallRole
 
-# TODO: PolicyArn output is incorrect — AWS::IAM::Policy creates an inline policy
-# (attached to the role), not a standalone managed policy. Inline policies do not
-# have their own ARN. Either remove this output or switch to AWS::IAM::ManagedPolicy.
-# Outputs:
-#   PolicyArn:
-#     Description: ARN of the verifier policy
-#     Value: !Sub 'arn:aws:iam::${AWS::AccountId}:policy/promethium-verifier-policy'
+Outputs:
+  PolicyArn:
+    Description: ARN of the verifier managed policy
+    Value: !Ref VerifierPolicy
