@@ -29,7 +29,6 @@ Promethium is deployed with an **internal load balancer** — accessible via VPN
   - [6. Post-Install Steps](#6-post-install-steps)
     - [6.1 Check pods](#61-check-pods)
     - [6.2 Update support password](#62-update-support-password)
-  - [The AWS install is now complete.](#the-aws-install-is-now-complete)
   - [Troubleshooting](#troubleshooting)
   - [Teardown](#teardown)
 
@@ -239,6 +238,7 @@ Post-deployment, the Promethium associate must reset the default support user pa
 
 
 The AWS install is now complete.
+
 ---
 
 ## Troubleshooting
