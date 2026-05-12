@@ -63,14 +63,10 @@ cd
 
 > The rest of the jumpbox commands must be run in this `/root` environment.
 
-Copy `promethium-outputs-<company_name>.sh` (generated in [README.md Section 6](README.md#6-customer-information-required-by-promethium)) to the jumpbox, then source it at the start of each session:
-
-> Replace `<company_name>` with the customer's company name before running.
-
+Next, replace `<company_name>` below and export the `COMPANY_NAME`:
 ```bash
-source promethium-outputs-<company_name>.sh
+export COMPANY_NAME="<company_name>"
 ```
----
 
 ### 1.1 Tool Installation
 
@@ -102,16 +98,28 @@ helm registry login ghcr.io -u promethium-ai --password-stdin <<< "$GHCR_TOKEN"
 
 ### 2.1 Clone the deployment repo
 
-From the Install VM/jumpbox, do:
+From the Install VM / Jumpbox, clone the tenant's branch from the deployment repository:
 
 ```bash
 git clone -b ${COMPANY_NAME} --single-branch https://github.com/promethium-ai/promethium-internal-ie-aws.git
 cd promethium-internal-ie-aws
 ```
 
+### 2.2 Source all customer outputs
+
+Source the `promethium-outputs-${COMPANY_NAME}.sh` file on the branch (originally generated from [README.md Section 6](README.md#6-customer-information-required-by-promethium)) inside the Jumpbox at the start of **each** session:
+
+```bash
+source promethium-outputs-${COMPANY_NAME}.sh
+```
+
+This allows us to retrieve customer output variables like `$AWS_REGION` and `$JUMPBOX_SG_ID` needed in following commands.
+
+---
+
 ## 3. Grant Cross-Account Trust
 
-> These commands must be run from your local machine where your AWS is authenticated, not from the install VM / jumpbox
+> ⚠️ These commands must be run from your local machine where your AWS CLI is authenticated, **NOT** from the Install VM / Jumpbox ⚠️
 
 Promethium's two internal accounts need to trust the customer's deployment role so that:
 - The S3 Terraform state backend can be accessed (account `734236616923`)

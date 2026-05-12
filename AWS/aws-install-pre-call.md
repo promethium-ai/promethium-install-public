@@ -5,16 +5,14 @@ This page documents instructions for the Promethium associate to complete pre-ca
 
 The instructions here create and configure a new branch for the customer from the Promethium associate's local machine.
 
-## 1. Create customer branch
-
 > ⚠️ **Run these commands on your local machine**, not the jumpbox
 
-Copy `promethium-outputs-<company_name>.sh` (generated in [README.md Section 6](README.md#6-customer-information-required-by-promethium)) to your local machine, then source it at the start of each terminal session:
+## 1. Create customer branch
 
 > Replace `<company_name>` with the customer's company name before running.
 
 ```bash
-source promethium-outputs-<company_name>.sh
+export COMPANY_NAME="<company_name>"
 ```
 
 Create the customer branch:
@@ -26,9 +24,25 @@ git checkout -b ${COMPANY_NAME}
 git push -u origin ${COMPANY_NAME}
 ```
 
+---
+
 ## 2. Code changes
 
-### 2.1 Configure `backend.tf`
+### 2.1 Copy customer prerequisite outputs
+
+First, copy `promethium-outputs-${COMPANY_NAME}.sh` (generated and sent by customer in [README.md Section 6](README.md#6-customer-information-required-by-promethium)) to your local machine.
+
+Then source it at the start of each terminal session, this allows us to substitute output variables like `TERRAFORM_ASSUME_ROLE_ARN`, `VPC_ID`, etc. in later files to configure the tenant's branch in `promethium-internal-ie-aws`.
+
+```bash
+# First, copy the customer output file or its contents to promethium-outputs-${COMPANY_NAME}.sh, in the editor of your choice, e.g.
+# vim promethium-outputs-${COMPANY_NAME}.sh
+
+# Then, source all the variables there
+source promethium-outputs-${COMPANY_NAME}.sh
+```
+
+### 2.2 Configure `backend.tf`
 
 ```bash
 cat > backend.tf << EOF
@@ -46,7 +60,7 @@ terraform {
 EOF
 ```
 
-### 2.2 Create `terraform.tfvars`
+### 2.3 Create `terraform.tfvars`
 
 > After running the following command, replace `<image_tag>` in `terraform.tfvars` with the Promethium release version provided by Promethium.
 
@@ -117,11 +131,13 @@ EOF
 
 
 ```bash
-git add backend.tf terraform.tfvars
+git add backend.tf terraform.tfvars promethium-outputs-${COMPANY_NAME}.sh
 git commit -m "Create new tenant: ${COMPANY_NAME}"
 git push origin ${COMPANY_NAME}
 ```
 
 ---
 
-You may now proceed to the main AWS install instructions
+You have completed the setup for the customer's branch in `promethium-internal-ie-aws` Github repository.
+
+You may now proceed to the final [AWS install instructions](aws-install.md).
