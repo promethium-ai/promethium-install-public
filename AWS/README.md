@@ -73,7 +73,7 @@ Your VPC must be at least a `/22` CIDR (e.g., `10.0.0.0/22`). Promethium uses an
 | Configuration | Private Subnets | AZs | Routing | Required Tags |
 |---|---|---|---|---|
 | **Required (minimum)** | 3 | 3 different AZs | NAT Gateway | `kubernetes.io/role/internal-elb=1` |
-| **Recommended** | 4 | 2+ different AZs | NAT Gateway | `kubernetes.io/role/internal-elb=1` |
+| **Recommended** | 4 | 3+ different AZs | NAT Gateway | `kubernetes.io/role/internal-elb=1` |
 
 > ⚠️ **Minimum 3 private subnets across 3 availability zones are required.** The internal ALB and EKS node groups both use these subnets. More subnets across more AZs improve availability and provide additional IP space for nodes.
 
