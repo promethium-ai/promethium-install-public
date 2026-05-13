@@ -16,20 +16,19 @@ The customer provides an existing VPC (with subnets and routing), an EC2 install
   - [2. Configure Terraform Branch](#2-configure-terraform-branch)
     - [2.1 Clone the deployment repo](#21-clone-the-deployment-repo)
     - [2.2 Source all customer outputs](#22-source-all-customer-outputs)
-  - [3. Grant Cross-Account Trust](#3-grant-cross-account-trust)
-  - [4. Verify Cross-Account Trust (optional)](#4-verify-cross-account-trust-optional)
-      - [4.1 Verifier Permissions (required before running verifier scripts)](#41-verifier-permissions-required-before-running-verifier-scripts)
-      - [4.2 Verifier Steps](#42-verifier-steps)
-  - [5. Deployment](#5-deployment)
+  - [3. Verify Cross-Account Trust (optional)](#3-verify-cross-account-trust-optional)
+    - [3.1 Verifier Permissions (required before running verifier scripts)](#31-verifier-permissions-required-before-running-verifier-scripts)
+    - [3.2 Verifier Steps](#32-verifier-steps)
+  - [4. Deployment](#4-deployment)
     - [Phase 1 — AWS Infrastructure](#phase-1--aws-infrastructure)
       - [Phase 1a — Create EKS cluster](#phase-1a--create-eks-cluster)
       - [Phase 1b — Authorize jumpbox to cluster API](#phase-1b--authorize-jumpbox-to-cluster-api)
       - [Phase 1c — Complete AWS infrastructure](#phase-1c--complete-aws-infrastructure)
     - [Phase 2 — Not required for AWS](#phase-2--not-required-for-aws)
     - [Phase 3 — Promethium Services](#phase-3--promethium-services)
-  - [6. Post-Install Steps](#6-post-install-steps)
-    - [6.1 Check pods](#61-check-pods)
-    - [6.2 Update support password](#62-update-support-password)
+  - [5. Post-Install Steps](#5-post-install-steps)
+    - [5.1 Check pods](#51-check-pods)
+    - [5.2 Update support password](#52-update-support-password)
   - [Troubleshooting](#troubleshooting)
   - [Teardown](#teardown)
 
@@ -120,30 +119,9 @@ This allows us to retrieve customer output variables like `$AWS_REGION` and `$JU
 
 ---
 
-## 3. Grant Cross-Account Trust
+## 3. Verify Cross-Account Trust (optional)
 
-> ⚠️ These commands must be run from your local machine where your AWS CLI is authenticated, **NOT** from the Install VM / Jumpbox ⚠️
-
-Promethium's two internal accounts need to trust the customer's deployment role so that:
-- The S3 Terraform state backend can be accessed (account `734236616923`)
-- The DynamoDB tenant lookup can run (account `308611924187`)
-
-Add `PromethiumDeploymentRole-${COMPANY_NAME}` to the trust policy of `promethium-terraform-saas-assume-role` in **both** accounts:
-
-> Replace `<734236616923-profile>` and `<308611924187-profile>` with your local AWS CLI profile names for each account.
-
-```bash
-# Account 734236616923 (S3 state backend)
-aws iam update-assume-role-policy --role-name promethium-terraform-saas-assume-role --policy-document "$(aws iam get-role --role-name promethium-terraform-saas-assume-role --query 'Role.AssumeRolePolicyDocument' --output json | jq '.Statement += [{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::'"${CUSTOMER_ACCOUNT_ID}"':role/PromethiumDeploymentRole-'"${COMPANY_NAME}"'"},"Action":"sts:AssumeRole","Condition":{"StringEquals":{"sts:ExternalId":"iac-terraform"}}}]')" --profile <734236616923-profile>
-
-# Account 308611924187 (DynamoDB tenant lookup)
-aws iam update-assume-role-policy --role-name promethium-terraform-saas-assume-role --policy-document "$(aws iam get-role --role-name promethium-terraform-saas-assume-role --query 'Role.AssumeRolePolicyDocument' --output json | jq '.Statement += [{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::'"${CUSTOMER_ACCOUNT_ID}"':role/PromethiumDeploymentRole-'"${COMPANY_NAME}"'"},"Action":"sts:AssumeRole","Condition":{"StringEquals":{"sts:ExternalId":"iac-terraform"}}}]')" --profile <308611924187-profile>
-```
----
-
-## 4. Verify Cross-Account Trust (optional)
-
-#### 4.1 Verifier Permissions (required before running verifier scripts)
+### 3.1 Verifier Permissions (required before running verifier scripts)
 
 > ⚠️ This command must be run from your local machine where your AWS CLI is authenticated, **NOT** from the Install VM / Jumpbox ⚠️
 
@@ -155,7 +133,7 @@ aws cloudformation create-stack --stack-name promethium-verifier-policy-${COMPAN
 
 > This policy grants read-only access to CloudFormation, IAM, and EKS — used only by the verifier scripts. It can be removed after the install is complete.
 
-#### 4.2 Verifier Steps
+### 3.2 Verifier Steps
 
 > The following command must be run inside the Install VM / Jumpbox in the `/root` environment.
 
@@ -166,7 +144,7 @@ bash verify_cross_account_trust.sh PromethiumDeploymentRole-${COMPANY_NAME} ${AW
 
 ---
 
-## 5. Deployment
+## 4. Deployment
 
 ### Phase 1 — AWS Infrastructure
 
@@ -230,9 +208,9 @@ terraform apply -var="ghcr_token=$GHCR_TOKEN"
 
 ---
 
-## 6. Post-Install Steps
+## 5. Post-Install Steps
 
-### 6.1 Check pods
+### 5.1 Check pods
 
 ```bash
 kubectl get pods -n intelligentedge
@@ -241,7 +219,7 @@ kubectl get pods -n intelligentedge
 All pods should be `Running` or `Completed`. The ingress `ADDRESS` is the internal ALB DNS name — accessible via VPN.
 
 
-### 6.2 Update support password
+### 5.2 Update support password
 
 Post-deployment, the Promethium associate must reset the default support user password and update dependent services. Please follow the [post-install credentials runbook](https://pm61data.atlassian.net/wiki/x/AgBfmw).
 

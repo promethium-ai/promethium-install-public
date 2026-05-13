@@ -5,7 +5,17 @@ This page documents instructions for the Promethium associate to complete pre-ca
 
 The instructions here create and configure a new branch for the customer from the Promethium associate's local machine.
 
-> ⚠️ **Run these commands on your local machine**, not the jumpbox
+> ⚠️ **Run these commands on your local machine**
+
+- [Promethium Intelligent Edge AWS Pre-call Installation (Promethium Associate)](#promethium-intelligent-edge-aws-pre-call-installation-promethium-associate)
+  - [1. Create customer branch](#1-create-customer-branch)
+  - [2. Code changes](#2-code-changes)
+    - [2.1 Copy customer prerequisite outputs](#21-copy-customer-prerequisite-outputs)
+    - [2.2 Configure `backend.tf`](#22-configure-backendtf)
+    - [2.3 Create `terraform.tfvars`](#23-create-terraformtfvars)
+    - [2.4 Push changes](#24-push-changes)
+  - [3. Grant Cross-Account Trust](#3-grant-cross-account-trust)
+
 
 ## 1. Create customer branch
 
@@ -127,7 +137,7 @@ EOF
 
 ---
 
-## 3. Push changes
+### 2.4 Push changes
 
 
 ```bash
@@ -138,6 +148,28 @@ git push origin ${COMPANY_NAME}
 
 ---
 
-You have completed the setup for the customer's branch in `promethium-internal-ie-aws` Github repository.
+## 3. Grant Cross-Account Trust
 
-You may now proceed to the final [AWS install instructions](aws-install.md).
+> ⚠️ These commands must be run from your local machine where your AWS CLI is authenticated for dev + prod accounts ⚠️
+
+Promethium's two internal accounts need to trust the customer's deployment role so that:
+- The S3 Terraform state backend can be accessed (account `734236616923`)
+- The DynamoDB tenant lookup can run (account `308611924187`)
+
+Add `PromethiumDeploymentRole-${COMPANY_NAME}` to the trust policy of `promethium-terraform-saas-assume-role` in **both** accounts:
+
+> Replace `<734236616923-profile>` and `<308611924187-profile>` with your local AWS CLI profile names for each account.
+
+```bash
+# Account 734236616923 (S3 state backend)
+aws iam update-assume-role-policy --role-name promethium-terraform-saas-assume-role --policy-document "$(aws iam get-role --role-name promethium-terraform-saas-assume-role --query 'Role.AssumeRolePolicyDocument' --output json | jq '.Statement += [{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::'"${CUSTOMER_ACCOUNT_ID}"':role/PromethiumDeploymentRole-'"${COMPANY_NAME}"'"},"Action":"sts:AssumeRole","Condition":{"StringEquals":{"sts:ExternalId":"iac-terraform"}}}]')" --profile <734236616923-profile>
+
+# Account 308611924187 (DynamoDB tenant lookup)
+aws iam update-assume-role-policy --role-name promethium-terraform-saas-assume-role --policy-document "$(aws iam get-role --role-name promethium-terraform-saas-assume-role --query 'Role.AssumeRolePolicyDocument' --output json | jq '.Statement += [{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::'"${CUSTOMER_ACCOUNT_ID}"':role/PromethiumDeploymentRole-'"${COMPANY_NAME}"'"},"Action":"sts:AssumeRole","Condition":{"StringEquals":{"sts:ExternalId":"iac-terraform"}}}]')" --profile <308611924187-profile>
+```
+
+The DEV + PROD AWS accounts now trust the customer's role to create resources.
+
+---
+
+You have completed the pre-call setup for the customer's branch in `promethium-internal-ie-aws`. Get on a call with the customer — they will now follow the [AWS Install Guide](aws-install.md) with you on-call to guide them.
