@@ -2,7 +2,7 @@
 
 This page documents the AWS install steps run by the **customer**, on-call with the Promethium associate. It follows after the customer completes prerequisites ([`README.md`](README.md)) and the Promethium associate completes pre-call setup ([aws-install-pre-call.md](aws-install-pre-call.md)).
 
-The customer provides an existing VPC (with subnets and routing), an EC2 install VM/jumpbox, the Terraform install role (`install_role.yaml`), and all operational IAM roles (`operational_roles.yaml`). Promethium's Terraform creates the EKS cluster, configures OIDC trust policies, deploys EKS add-ons, and installs the full Promethium application stack.
+The customer provides an existing VPC (with subnets and routing), an EC2 install VM/jumpbox, the Terraform install role (`install_role.yaml`), and all operational IAM roles (`operational_roles.yaml`). The Terraform deployment creates the EKS cluster, configures OIDC trust policies, deploys EKS add-ons, and installs the full Promethium application stack.
 
 > Promethium is deployed with an **internal load balancer** — accessible via VPN only.
 
@@ -220,6 +220,8 @@ All pods should be `Running` or `Completed`. The ingress `ADDRESS` is the intern
 
 
 ### 5.2 Update support password
+
+> ⚠️ This step must be completed by the Promethium associate ⚠️
 
 Post-deployment, the Promethium associate must reset the default support user password and update dependent services. Please follow the [post-install credentials runbook](https://pm61data.atlassian.net/wiki/x/AgBfmw).
 

@@ -28,8 +28,8 @@ This page documents instructions for the customer on how to setup prerequisites 
     - [3.b Option B - Attach the instance profile to your provided install VM](#3b-option-b---attach-the-instance-profile-to-your-provided-install-vm)
   - [4. Operational Roles](#4-operational-roles)
   - [5. Verification](#5-verification)
-      - [5.1 Verifier Permissions (required before running verifier scripts)](#51-verifier-permissions-required-before-running-verifier-scripts)
-      - [5.2 Verifier Script](#52-verifier-script)
+    - [5.1 Verifier Permissions (required before running verifier scripts)](#51-verifier-permissions-required-before-running-verifier-scripts)
+    - [5.2 Verifier Script](#52-verifier-script)
   - [6. Customer Information Required by Promethium](#6-customer-information-required-by-promethium)
     - [AWS Environment](#aws-environment)
     - [VPC and Subnets](#vpc-and-subnets)
@@ -42,9 +42,10 @@ This page documents instructions for the customer on how to setup prerequisites 
 
 ### How it works
 
-Installing a Promethium Intelligent Edge (IE) cluster requires two parties:
+Installing a Promethium Intelligent Edge (IE) cluster involves two parties across three sequential steps:
 - The customer will first provide prerequisite AWS infrastructure (by following this page) - VPC, subnets, install VM, install role, and operational IAM roles, etc.
-- The Promethium associate will then deploy the EKS cluster with Terraform, configure OIDC trust policies, and install the full Promethium application stack.
+- The Promethium associate will then complete pre-call setup — creating and configuring the customer's Terraform branch ([aws-install-pre-call.md](aws-install-pre-call.md)).
+- The customer will then deploy the EKS cluster with Terraform, configure OIDC trust policies, and install the full Promethium application stack — on-call with the Promethium associate.
 
 Promethium is always deployed with an **internal load balancer** — accessible via VPN only.
 
@@ -300,7 +301,7 @@ Deploy [`CFT/operational_roles.yaml`](CFT/operational_roles.yaml).
 
 > `OIDCProviderUrl` is left as the default dummy value — it is updated after Phase 1a once the EKS cluster and OIDC provider exist.
 
-Use this when Promethium will create the EKS cluster. The cluster name defaults to `promethium-datafabric-prod-${COMPANY_NAME}-eks-cluster`.
+Use this when the EKS cluster will be created by the Promethium Terraform deployment. The cluster name defaults to `promethium-datafabric-prod-${COMPANY_NAME}-eks-cluster`.
 
 ```bash
 aws cloudformation create-stack --stack-name promethium-eks-base-roles-${COMPANY_NAME} --template-body file://AWS/CFT/operational_roles.yaml --parameters ParameterKey=CompanyName,ParameterValue=${COMPANY_NAME} --capabilities CAPABILITY_NAMED_IAM --region ${AWS_REGION}
@@ -338,7 +339,7 @@ This creates all 8 operational roles (all names are suffixed with `${COMPANY_NAM
 
 ## 5. Verification
 
-#### 5.1 Verifier Permissions (required before running verifier scripts)
+### 5.1 Verifier Permissions (required before running verifier scripts)
 
 Add the necessary read-only permissions to your own AWS user/role in order to run verification scripts:
 
@@ -436,7 +437,7 @@ Where `verifier-permissions.json` is the policy JSON saved to a local file.
 
 ---
 
-#### 5.2 Verifier Script
+### 5.2 Verifier Script
 
 ```bash
 curl -fsSL -O https://raw.githubusercontent.com/promethium-ai/promethium-install-public/main/AWS/utilities/verify_install_role.sh
