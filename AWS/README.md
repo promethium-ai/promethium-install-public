@@ -48,7 +48,7 @@ Installing a Promethium Intelligent Edge (IE) cluster requires two parties:
 
 Promethium is always deployed with an **internal load balancer** — accessible via VPN only.
 
-Once the customer has provided the prerequisite infrastructure and variables, the Promethium associate will then follow a separate [AWS Install Guide](aws-install.md)
+Once the customer has provided the prerequisite infrastructure and variables, the customer will follow the [AWS Install Guide](aws-install.md) on-call with the Promethium associate.
 
 ---
 
@@ -553,7 +553,7 @@ The following sections describe the outputs collected above.
 | Resource | Description |
 |----------|-------------|
 | [AWS Install Guide (pre-call)](aws-install-pre-call.md) | Step-by-step installation guide for Promethium associates before installing on-call |
-| [AWS Install Guide](aws-install.md) | Step-by-step installation guide for Promethium associates |
+| [AWS Install Guide](aws-install.md) | Run by the customer on-call with a Promethium associate |
 | [Install Role CFT](CFT/install_role.yaml) | Creates the Terraform deployment role and instance profile |
 | [Verifier Policy CFT](CFT/verifier_policy.yaml) | Adds read-only permissions for running pre-install verifier scripts from the jumpbox |
 | [Operational Roles CFT](CFT/operational_roles.yaml) | Creates EKS cluster role, worker role, and all 6 OIDC/IRSA roles |

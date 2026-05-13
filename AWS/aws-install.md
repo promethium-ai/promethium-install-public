@@ -1,12 +1,12 @@
-# Promethium Intelligent Edge AWS Installation (Promethium Associate)
+# Promethium Intelligent Edge AWS Installation (Customer)
 
-This page documents instructions on completing the AWS install, once the customer completes prerequisites ([`README.md`](README.md)), and the Promethium associate completes the pre-call instructions to create and configure the tenant's branch ([aws-install-pre-call.md](aws-install-pre-call.md)) in the Github deployment repository `promethium-internal-ie-aws`.
+This page documents the AWS install steps run by the **customer**, on-call with the Promethium associate. It follows after the customer completes prerequisites ([`README.md`](README.md)) and the Promethium associate completes pre-call setup ([aws-install-pre-call.md](aws-install-pre-call.md)).
 
 The customer provides an existing VPC (with subnets and routing), an EC2 install VM/jumpbox, the Terraform install role (`install_role.yaml`), and all operational IAM roles (`operational_roles.yaml`). Promethium's Terraform creates the EKS cluster, configures OIDC trust policies, deploys EKS add-ons, and installs the full Promethium application stack.
 
 > Promethium is deployed with an **internal load balancer** — accessible via VPN only.
 
-- [Promethium Intelligent Edge AWS Installation (Promethium Associate)](#promethium-intelligent-edge-aws-installation-promethium-associate)
+- [Promethium Intelligent Edge AWS Installation (Customer)](#promethium-intelligent-edge-aws-installation-customer)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
   - [1. Setup: Connect to the Install VM and configure the environment](#1-setup-connect-to-the-install-vm-and-configure-the-environment)
