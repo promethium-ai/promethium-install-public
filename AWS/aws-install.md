@@ -76,7 +76,7 @@ export COMPANY_NAME="<company_name>"
 Install required tools (Terraform, kubectl, Helm, git, jq) on the install VM:
 
 ```bash
-curl -O https://raw.githubusercontent.com/promethium-ai/promethium-install-public/main/AWS/utilities/install_tools.sh
+curl -fsSL -O https://raw.githubusercontent.com/promethium-ai/promethium-install-public/main/AWS/utilities/install_tools.sh
 bash install_tools.sh
 ```
 
@@ -160,7 +160,7 @@ aws cloudformation create-stack --stack-name promethium-verifier-policy-${COMPAN
 > The following command must be run inside the Install VM / Jumpbox in the `/root` environment.
 
 ```bash
-curl -O https://raw.githubusercontent.com/promethium-ai/promethium-install-public/main/AWS/utilities/verify_cross_account_trust.sh
+curl -fsSL -O https://raw.githubusercontent.com/promethium-ai/promethium-install-public/main/AWS/utilities/verify_cross_account_trust.sh
 bash verify_cross_account_trust.sh PromethiumDeploymentRole-${COMPANY_NAME} ${AWS_REGION}
 ```
 

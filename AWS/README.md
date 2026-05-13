@@ -439,11 +439,11 @@ Where `verifier-permissions.json` is the policy JSON saved to a local file.
 #### 5.2 Verifier Script
 
 ```bash
-curl -O https://raw.githubusercontent.com/promethium-ai/promethium-install-public/main/AWS/utilities/verify_install_role.sh
+curl -fsSL -O https://raw.githubusercontent.com/promethium-ai/promethium-install-public/main/AWS/utilities/verify_install_role.sh
 chmod +x verify_install_role.sh
 ./verify_install_role.sh PromethiumDeploymentRole-${COMPANY_NAME} ${AWS_REGION}
 
-curl -O https://raw.githubusercontent.com/promethium-ai/promethium-install-public/main/AWS/utilities/verify_network.sh
+curl -fsSL -O https://raw.githubusercontent.com/promethium-ai/promethium-install-public/main/AWS/utilities/verify_network.sh
 chmod +x verify_network.sh
 # From Promethium network CFT (Option A):
 VPC_ID=$(aws cloudformation describe-stacks --stack-name "pmie-network-${COMPANY_NAME}" --query 'Stacks[0].Outputs[?OutputKey==`VpcId`].OutputValue' --output text --region ${AWS_REGION})
@@ -451,7 +451,7 @@ VPC_ID=$(aws cloudformation describe-stacks --stack-name "pmie-network-${COMPANY
 # VPC_ID="<your-vpc-id>"
 ./verify_network.sh ${COMPANY_NAME} ${VPC_ID} ${AWS_REGION} --stack pmie-network-${COMPANY_NAME}
 
-curl -O https://raw.githubusercontent.com/promethium-ai/promethium-install-public/main/AWS/utilities/verify_operational_roles.sh
+curl -fsSL -O https://raw.githubusercontent.com/promethium-ai/promethium-install-public/main/AWS/utilities/verify_operational_roles.sh
 chmod +x verify_operational_roles.sh
 ./verify_operational_roles.sh ${COMPANY_NAME} ${AWS_REGION} promethium-eks-base-roles-${COMPANY_NAME}
 ```
