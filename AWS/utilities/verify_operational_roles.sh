@@ -103,21 +103,24 @@ if [ -n "$STACK_NAME" ]; then
       && check_pass "CompanyName matches: ${COMPANY}" \
       || check_fail "CompanyName mismatch" "Got '${COMPANY_PARAM}', expected '${COMPANY}'"
 
-    echo "$OIDC_PARAM" | grep -q "$DUMMY_OIDC" \
-      && check_warn "OIDCProviderUrl is still the dummy value" "Must update after EKS cluster is created (Phase 1a). Run:
-      OIDC_URL=\$(aws eks describe-cluster \\
-        --name ${EXPECTED_CLUSTER} \\
-        --query 'cluster.identity.oidc.issuer' \\
-        --output text --region ${REGION} | sed 's|https://||')
-      aws cloudformation update-stack \\
-        --stack-name ${STACK_NAME} \\
-        --use-previous-template \\
-        --parameters \\
-          ParameterKey=CompanyName,ParameterValue=${COMPANY} \\
-          ParameterKey=OIDCProviderUrl,ParameterValue=\$OIDC_URL \\
-        --capabilities CAPABILITY_NAMED_IAM \\
-        --region ${REGION}" \
-      || check_pass "OIDCProviderUrl is real value: ${OIDC_PARAM}"
+    if echo "$OIDC_PARAM" | grep -q "$DUMMY_OIDC"; then
+      check_pass "OIDCProviderUrl is dummy placeholder (expected before Phase 1a)"
+      echo "     After EKS cluster is created, update with:"
+      echo "       OIDC_URL=\$(aws eks describe-cluster \\"
+      echo "         --name ${EXPECTED_CLUSTER} \\"
+      echo "         --query 'cluster.identity.oidc.issuer' \\"
+      echo "         --output text --region ${REGION} | sed 's|https://||')"
+      echo "       aws cloudformation update-stack \\"
+      echo "         --stack-name ${STACK_NAME} \\"
+      echo "         --use-previous-template \\"
+      echo "         --parameters \\"
+      echo "           ParameterKey=CompanyName,ParameterValue=${COMPANY} \\"
+      echo "           ParameterKey=OIDCProviderUrl,ParameterValue=\$OIDC_URL \\"
+      echo "         --capabilities CAPABILITY_NAMED_IAM \\"
+      echo "         --region ${REGION}"
+    else
+      check_pass "OIDCProviderUrl is real value: ${OIDC_PARAM}"
+    fi
   fi
 fi
 
