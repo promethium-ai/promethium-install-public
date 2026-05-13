@@ -6,7 +6,7 @@
 #
 # - company_name:   used to derive expected cluster name and default role names
 # - aws_region:     AWS region
-# - ops_stack_name: (optional) CFT stack name to validate OIDC URL and ClusterName params
+# - stack_name:     (optional) CFT stack name to validate CompanyName and OIDCProviderUrl params
 # --discover:       scan all IAM roles and identify candidates by managed policy/trust pattern
 #                   use this when role names are unknown
 #
@@ -24,29 +24,30 @@ REGION=${2:-us-east-1}
 DISCOVER=false
 STACK_NAME=""
 
-# Parse flags
+# Parse remaining args — accept stack name as 3rd positional or via --stack flag
 shift 2 2>/dev/null
 while [ $# -gt 0 ]; do
   case "$1" in
     --stack)    STACK_NAME="$2"; shift 2 ;;
     --discover) DISCOVER=true; shift ;;
-    *)          shift ;;
+    -*)         shift ;;
+    *)          [ -z "$STACK_NAME" ] && STACK_NAME="$1"; shift ;;
   esac
 done
 
 if [ -z "$COMPANY" ]; then
-  echo "Usage: $0 <company_name> [aws_region] [--stack <stack_name>] [--discover]"
+  echo "Usage: $0 <company_name> [aws_region] [stack_name] [--discover]"
   echo ""
   echo "  company_name  Required. Used to derive expected cluster name and default role names."
   echo "  aws_region    Optional. Defaults to us-east-1."
-  echo "  --stack       Optional. CFT stack name to validate ClusterName and OIDC URL params."
+  echo "  stack_name    Optional. CFT stack name (positional or --stack <name>)."
   echo "  --discover    Optional. Scan all IAM roles and identify candidates by policy pattern."
   echo ""
   echo "Examples:"
   echo "  $0 acme us-east-1"
-  echo "  $0 acme us-east-1 --stack promethium-operational-roles-acme"
-  echo "  $0 acme us-east-1 --discover"
-  echo "  $0 acme us-east-1 --stack my-custom-stack-name --discover"
+  echo "  $0 acme us-east-1 promethium-eks-base-roles-acme"
+  echo "  $0 acme us-east-1 --stack promethium-eks-base-roles-acme"
+  echo "  $0 acme us-east-1 promethium-eks-base-roles-acme --discover"
   exit 1
 fi
 
@@ -85,9 +86,9 @@ if [ -n "$STACK_NAME" ]; then
       && check_pass "Stack status: ${STACK_STATUS}" \
       || check_fail "Stack status" "${STACK_STATUS} — expected CREATE_COMPLETE or UPDATE_COMPLETE"
 
-    CLUSTER_PARAM=$(aws cloudformation describe-stacks \
+    COMPANY_PARAM=$(aws cloudformation describe-stacks \
       --stack-name "$STACK_NAME" \
-      --query "Stacks[0].Parameters[?ParameterKey=='ClusterName'].ParameterValue" \
+      --query "Stacks[0].Parameters[?ParameterKey=='CompanyName'].ParameterValue" \
       --output text --region "$REGION" 2>/dev/null)
 
     OIDC_PARAM=$(aws cloudformation describe-stacks \
@@ -95,12 +96,12 @@ if [ -n "$STACK_NAME" ]; then
       --query "Stacks[0].Parameters[?ParameterKey=='OIDCProviderUrl'].ParameterValue" \
       --output text --region "$REGION" 2>/dev/null)
 
-    echo "     ClusterName:     ${CLUSTER_PARAM}"
+    echo "     CompanyName:     ${COMPANY_PARAM}"
     echo "     OIDCProviderUrl: ${OIDC_PARAM}"
 
-    [ "$CLUSTER_PARAM" = "$EXPECTED_CLUSTER" ] \
-      && check_pass "ClusterName matches: ${EXPECTED_CLUSTER}" \
-      || check_fail "ClusterName mismatch" "Got '${CLUSTER_PARAM}', expected '${EXPECTED_CLUSTER}'"
+    [ "$COMPANY_PARAM" = "$COMPANY" ] \
+      && check_pass "CompanyName matches: ${COMPANY}" \
+      || check_fail "CompanyName mismatch" "Got '${COMPANY_PARAM}', expected '${COMPANY}'"
 
     echo "$OIDC_PARAM" | grep -q "$DUMMY_OIDC" \
       && check_warn "OIDCProviderUrl is still the dummy value" "Must update after EKS cluster is created (Phase 1a). Run:
@@ -112,7 +113,7 @@ if [ -n "$STACK_NAME" ]; then
         --stack-name ${STACK_NAME} \\
         --use-previous-template \\
         --parameters \\
-          ParameterKey=ClusterName,ParameterValue=${EXPECTED_CLUSTER} \\
+          ParameterKey=CompanyName,ParameterValue=${COMPANY} \\
           ParameterKey=OIDCProviderUrl,ParameterValue=\$OIDC_URL \\
         --capabilities CAPABILITY_NAMED_IAM \\
         --region ${REGION}" \
@@ -166,14 +167,14 @@ check_role() {
   fi
 }
 
-check_role "cluster_role_arn"                "EKSClusterRoleArn"            "promethium-prod-eks-cluster-role"
-check_role "worker_role_arn"                 "EKSWorkerNodeRoleArn"         "promethium-prod-eks-worker-role"
-check_role "aws_ebs_driver_role_arn"         "EBSCSIDriverRoleArn"          "promethium-prod-ebs-csi-driver-role"
-check_role "aws_efs_driver_role_arn"         "EFSCSIDriverRoleArn"          "promethium-prod-efs-csi-driver-role"
-check_role "aws_lb_controller_role_arn"      "LoadBalancerControllerRoleArn" "promethium-prod-lb-controller-role"
-check_role "aws_eks_autoscaler_role_arn"     "ClusterAutoscalerRoleArn"     "promethium-prod-cluster-autoscaler-role"
-check_role "pg_backup_cronjob_oidc_role_arn" "PGBackupServiceRoleArn"       "promethium-prod-pg-backup-role"
-check_role "trino_oidc_role_arn"             "GlueTrinoServiceRoleArn"      "promethium-prod-glue-trino-role"
+check_role "cluster_role_arn"                "EKSClusterRoleArn"             "promethium-prod-eks-cluster-role-${COMPANY}"
+check_role "worker_role_arn"                 "EKSWorkerNodeRoleArn"          "promethium-prod-eks-worker-role-${COMPANY}"
+check_role "aws_ebs_driver_role_arn"         "EBSCSIDriverRoleArn"           "promethium-prod-ebs-csi-driver-role-${COMPANY}"
+check_role "aws_efs_driver_role_arn"         "EFSCSIDriverRoleArn"           "promethium-prod-efs-csi-driver-role-${COMPANY}"
+check_role "aws_lb_controller_role_arn"      "LoadBalancerControllerRoleArn" "promethium-prod-lb-controller-role-${COMPANY}"
+check_role "aws_eks_autoscaler_role_arn"     "ClusterAutoscalerRoleArn"      "promethium-prod-cluster-autoscaler-role-${COMPANY}"
+check_role "pg_backup_cronjob_oidc_role_arn" "PGBackupServiceRoleArn"        "promethium-prod-pg-backup-role-${COMPANY}"
+check_role "trino_oidc_role_arn"             "GlueTrinoServiceRoleArn"       "promethium-prod-glue-trino-role-${COMPANY}"
 
 # ── 3. OIDC URL validation ────────────────────────────────────────────────────
 echo ""
@@ -234,13 +235,13 @@ fi
 
 # ── 4. EKS cluster role trust ─────────────────────────────────────────────────
 echo ""
-echo "── 3. EKS cluster role trust"
+echo "── 4. EKS cluster role trust"
 CLUSTER_ROLE_NAME=""
 if [ -n "$STACK_NAME" ]; then
   CLUSTER_ROLE_ARN=$(get_role_arn_from_stack "EKSClusterRoleArn")
   [ -n "$CLUSTER_ROLE_ARN" ] && CLUSTER_ROLE_NAME=$(echo "$CLUSTER_ROLE_ARN" | cut -d'/' -f2)
 fi
-[ -z "$CLUSTER_ROLE_NAME" ] && CLUSTER_ROLE_NAME="promethium-prod-eks-cluster-role"
+[ -z "$CLUSTER_ROLE_NAME" ] && CLUSTER_ROLE_NAME="promethium-prod-eks-cluster-role-${COMPANY}"
 
 TRUST=$(aws iam get-role --role-name "$CLUSTER_ROLE_NAME" \
   --query 'Role.AssumeRolePolicyDocument' --output json 2>/dev/null)
@@ -248,15 +249,15 @@ echo "$TRUST" | grep -q "eks.amazonaws.com" \
   && check_pass "EKS cluster role trusts eks.amazonaws.com" \
   || check_fail "EKS cluster role trust" "Missing eks.amazonaws.com trust — cluster creation will fail"
 
-# ── 4. Worker role trust ──────────────────────────────────────────────────────
+# ── 5. Worker role trust ──────────────────────────────────────────────────────
 echo ""
-echo "── 4. EKS worker role trust"
+echo "── 5. EKS worker role trust"
 WORKER_ROLE_NAME=""
 if [ -n "$STACK_NAME" ]; then
   WORKER_ROLE_ARN=$(get_role_arn_from_stack "EKSWorkerNodeRoleArn")
   [ -n "$WORKER_ROLE_ARN" ] && WORKER_ROLE_NAME=$(echo "$WORKER_ROLE_ARN" | cut -d'/' -f2)
 fi
-[ -z "$WORKER_ROLE_NAME" ] && WORKER_ROLE_NAME="promethium-prod-eks-worker-role"
+[ -z "$WORKER_ROLE_NAME" ] && WORKER_ROLE_NAME="promethium-prod-eks-worker-role-${COMPANY}"
 
 TRUST=$(aws iam get-role --role-name "$WORKER_ROLE_NAME" \
   --query 'Role.AssumeRolePolicyDocument' --output json 2>/dev/null)

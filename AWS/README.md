@@ -414,28 +414,22 @@ EOF
 
 ```bash
 CUSTOMER_ROLE_NAME="<your-iam-role-name>"  # Fill in: your IAM role name
-AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-VERIFIER_POLICY_ARN="arn:aws:iam::${AWS_ACCOUNT_ID}:policy/${CUSTOMER_ROLE_NAME}-verifier-policy"
-aws iam create-policy \
-  --policy-name ${CUSTOMER_ROLE_NAME}-verifier-policy \
-  --policy-document file://verifier-permissions.json
-aws iam attach-role-policy \
+aws iam put-role-policy \
   --role-name ${CUSTOMER_ROLE_NAME} \
-  --policy-arn ${VERIFIER_POLICY_ARN}
+  --policy-name promethium-verifier-policy \
+  --policy-document file://verifier-permissions.json \
+  --region ${AWS_REGION}
 ```
 
 **If you are using an IAM user**:
 
 ```bash
 CUSTOMER_USER_NAME="<your-iam-user-name>"  # Fill in: your IAM user name
-AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-VERIFIER_POLICY_ARN="arn:aws:iam::${AWS_ACCOUNT_ID}:policy/${CUSTOMER_USER_NAME}-verifier-policy"
-aws iam create-policy \
-  --policy-name ${CUSTOMER_USER_NAME}-verifier-policy \
-  --policy-document file://verifier-permissions.json
-aws iam attach-user-policy \
+aws iam put-user-policy \
   --user-name ${CUSTOMER_USER_NAME} \
-  --policy-arn ${VERIFIER_POLICY_ARN}
+  --policy-name promethium-verifier-policy \
+  --policy-document file://verifier-permissions.json \
+  --region ${AWS_REGION}
 ```
 
 Where `verifier-permissions.json` is the policy JSON saved to a local file.
@@ -467,19 +461,13 @@ Once verification is done, you may remove the trust policy:
 If you are using an **IAM role**:
 ```bash
 CUSTOMER_ROLE_NAME="<your-iam-role-name>"  # Fill in: your IAM role name
-AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-VERIFIER_POLICY_ARN="arn:aws:iam::${AWS_ACCOUNT_ID}:policy/${CUSTOMER_ROLE_NAME}-verifier-policy"
-aws iam detach-role-policy --role-name ${CUSTOMER_ROLE_NAME} --policy-arn ${VERIFIER_POLICY_ARN}
-aws iam delete-policy --policy-arn ${VERIFIER_POLICY_ARN}
+aws iam delete-role-policy --role-name ${CUSTOMER_ROLE_NAME} --policy-name promethium-verifier-policy
 ```
 
 If you are using an **IAM user**:
 ```bash
 CUSTOMER_USER_NAME="<your-iam-user-name>"  # Fill in: your IAM user name
-AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-VERIFIER_POLICY_ARN="arn:aws:iam::${AWS_ACCOUNT_ID}:policy/${CUSTOMER_USER_NAME}-verifier-policy"
-aws iam detach-user-policy --user-name ${CUSTOMER_USER_NAME} --policy-arn ${VERIFIER_POLICY_ARN}
-aws iam delete-policy --policy-arn ${VERIFIER_POLICY_ARN}
+aws iam delete-user-policy --user-name ${CUSTOMER_USER_NAME} --policy-name promethium-verifier-policy
 ```
 
 ---
