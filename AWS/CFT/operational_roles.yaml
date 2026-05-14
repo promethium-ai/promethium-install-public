@@ -12,7 +12,8 @@ Metadata:
       - Label:
           default: "EKS Role Configuration"
         Parameters:
-          - ClusterName
+          - CompanyName
+          - CustomClusterName
           - OIDCProviderUrl
           - EBSCSIDriverRoleName
           - EFSCSIDriverRoleName
@@ -29,10 +30,14 @@ Metadata:
         default: "Custom Tags (Key=Value,Key2=Value2)"
 
 Parameters:
-  ClusterName:
+  CompanyName:
     Type: String
-    Default: promethium-datafabric-prod-eks-cluster
-    Description: Name of the EKS cluster (used for role naming and conditions)
+    Description: Short company identifier (e.g. acme). Appended to all default role names to avoid conflicts when multiple Promethium deployments exist in the same account.
+
+  CustomClusterName:
+    Type: String
+    Default: ''
+    Description: "Optional EKS cluster name override. Leave blank to use the default format promethium-datafabric-prod-<CompanyName>-eks-cluster."
   
   OIDCProviderUrl:
     Type: String
@@ -102,6 +107,7 @@ Mappings:
       Project: Intelligentedge
 
 Conditions:
+  HasCustomClusterName: !Not [!Equals [!Ref CustomClusterName, '']]
   HasCustomEBSRoleName: !Not [!Equals [!Ref EBSCSIDriverRoleName, '']]
   HasCustomEFSRoleName: !Not [!Equals [!Ref EFSCSIDriverRoleName, '']]
   HasCustomLBRoleName: !Not [!Equals [!Ref LoadBalancerControllerRoleName, '']]
@@ -184,7 +190,7 @@ Resources:
       RoleName: !If 
         - HasCustomEBSRoleName
         - !Ref EBSCSIDriverRoleName
-        - !Sub 'promethium-prod-ebs-csi-driver-role'
+        - !Sub 'promethium-prod-ebs-csi-driver-role-${CompanyName}'
       AssumeRolePolicyDocument:
         Fn::Sub:
           - |
@@ -239,7 +245,7 @@ Resources:
       RoleName: !If 
         - HasCustomEFSRoleName
         - !Ref EFSCSIDriverRoleName
-        - !Sub 'promethium-prod-efs-csi-driver-role'
+        - !Sub 'promethium-prod-efs-csi-driver-role-${CompanyName}'
       AssumeRolePolicyDocument:
         Fn::Sub:
           - |
@@ -279,7 +285,7 @@ Resources:
                   - elasticfilesystem:CreateAccessPoint
                 Condition:
                   StringLike:
-                    aws:RequestTag/cluster-name: !Ref ClusterName
+                    aws:RequestTag/cluster-name: !If [HasCustomClusterName, !Ref CustomClusterName, !Sub 'promethium-datafabric-prod-${CompanyName}-eks-cluster']
                     aws:RequestTag/efs.csi.aws.com/cluster: 'true'
                 Effect: Allow
                 Resource: '*'
@@ -287,7 +293,7 @@ Resources:
                   - elasticfilesystem:DeleteAccessPoint
                 Condition:
                   StringLike:
-                    aws:RequestTag/cluster-name: !Ref ClusterName
+                    aws:RequestTag/cluster-name: !If [HasCustomClusterName, !Ref CustomClusterName, !Sub 'promethium-datafabric-prod-${CompanyName}-eks-cluster']
                     aws:RequestTag/efs.csi.aws.com/cluster: 'true'
                 Effect: Allow
                 Resource: '*'
@@ -298,7 +304,7 @@ Resources:
       RoleName: !If 
         - HasCustomLBRoleName
         - !Ref LoadBalancerControllerRoleName
-        - !Sub 'promethium-prod-lb-controller-role'
+        - !Sub 'promethium-prod-lb-controller-role-${CompanyName}'
       AssumeRolePolicyDocument:
         Fn::Sub:
           - |
@@ -326,7 +332,7 @@ Resources:
   LoadBalancerControllerPolicy:
     Type: AWS::IAM::Policy
     Properties:
-      PolicyName: !Sub 'promethium-prod-lbcontroller-policy'
+      PolicyName: !Sub 'promethium-prod-lbcontroller-policy-${CompanyName}'
       Roles:
         - !Ref LoadBalancerControllerRole
       PolicyDocument:
@@ -505,7 +511,7 @@ Resources:
       RoleName: !If 
         - HasCustomCARoleName
         - !Ref ClusterAutoscalerRoleName
-        - !Sub 'promethium-prod-cluster-autoscaler-role'
+        - !Sub 'promethium-prod-cluster-autoscaler-role-${CompanyName}'
       AssumeRolePolicyDocument:
         Fn::Sub:
           - |
@@ -569,7 +575,7 @@ Resources:
                     }
                   ]
                 }
-              - ClusterName: !Ref ClusterName
+              - ClusterName: !If [HasCustomClusterName, !Ref CustomClusterName, !Sub 'promethium-datafabric-prod-${CompanyName}-eks-cluster']
 
   EKSClusterRole:
     Type: AWS::IAM::Role
@@ -577,7 +583,7 @@ Resources:
       RoleName: !If 
         - HasCustomEKSClusterRoleName
         - !Ref EKSClusterRoleName
-        - !Sub 'promethium-prod-eks-cluster-role'
+        - !Sub 'promethium-prod-eks-cluster-role-${CompanyName}'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -597,7 +603,7 @@ Resources:
       RoleName: !If 
         - HasCustomEKSWorkerRoleName
         - !Ref EKSWorkerNodeRoleName
-        - !Sub 'promethium-prod-eks-worker-role'
+        - !Sub 'promethium-prod-eks-worker-role-${CompanyName}'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -632,7 +638,7 @@ Resources:
       RoleName: !If 
         - HasCustomPGBackupRoleName
         - !Ref PGBackupServiceRoleName
-        - !Sub 'promethium-prod-pg-backup-role'
+        - !Sub 'promethium-prod-pg-backup-role-${CompanyName}'
       AssumeRolePolicyDocument:
         Fn::Sub:
           - |
@@ -700,7 +706,7 @@ Resources:
       RoleName: !If 
         - HasCustomGlueTrinoRoleName
         - !Ref GlueTrinoServiceRoleName
-        - !Sub 'promethium-prod-glue-trino-role'
+        - !Sub 'promethium-prod-glue-trino-role-${CompanyName}'
       AssumeRolePolicyDocument:
         Fn::Sub:
           - |
