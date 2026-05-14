@@ -125,7 +125,12 @@ This allows us to retrieve customer output variables like `$AWS_REGION` and `$JU
 
 > ⚠️ This command must be run from your local machine where your AWS CLI is authenticated, **NOT** from the Install VM / Jumpbox ⚠️
 
-Before running the Promethium pre-install verifier scripts on the Install VM / Jumpbox, deploy [`CFT/verifier_policy.yaml`](CFT/verifier_policy.yaml) to add the necessary read-only permissions to the install role:
+First, navigate to the `promethium-install-public` repo and source the output variables that you previously saved:
+```bash
+source promethium-outputs-${COMPANY_NAME}.sh
+```
+
+Then, before running the Promethium pre-install verifier scripts on the Install VM / Jumpbox, deploy [`CFT/verifier_policy.yaml`](CFT/verifier_policy.yaml) to add the necessary read-only permissions to the install role:
 
 ```bash
 aws cloudformation create-stack --stack-name promethium-verifier-policy-${COMPANY_NAME} --template-body file://AWS/CFT/verifier_policy.yaml --parameters ParameterKey=PromethiumInstallRole,ParameterValue=PromethiumDeploymentRole-${COMPANY_NAME} --capabilities CAPABILITY_NAMED_IAM --region ${AWS_REGION}
