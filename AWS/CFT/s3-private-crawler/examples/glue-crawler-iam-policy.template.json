@@ -1,0 +1,78 @@
+{
+  "__comment": "Inline policy for the Promethium crawler IAM role (the same role used by Trino IRSA and Glue's crawler runtime). Replace <REGION>, <IE_ACCOUNT>, and <CRAWLER_ROLE_NAME> before applying. See AWS/CFT/s3-private-crawler/README.md for context.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowGetGlueConnection",
+      "Effect": "Allow",
+      "Action": [
+        "glue:GetConnection",
+        "glue:GetConnections"
+      ],
+      "Resource": [
+        "arn:aws:glue:<REGION>:<IE_ACCOUNT>:catalog",
+        "arn:aws:glue:<REGION>:<IE_ACCOUNT>:connection/*"
+      ]
+    },
+    {
+      "Sid": "AllowPassRoleToGlue",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::<IE_ACCOUNT>:role/<CRAWLER_ROLE_NAME>",
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": "glue.amazonaws.com"
+        }
+      }
+    },
+    {
+      "Sid": "AllowGlueCrawlerLogging",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents",
+        "logs:DescribeLogStreams",
+        "logs:DescribeLogGroups"
+      ],
+      "Resource": [
+        "arn:aws:logs:<REGION>:<IE_ACCOUNT>:log-group:/aws-glue/*",
+        "arn:aws:logs:<REGION>:<IE_ACCOUNT>:log-group:/aws-glue/*:*",
+        "arn:aws:logs:<REGION>:<IE_ACCOUNT>:log-group:/aws-glue/*:log-stream:*"
+      ]
+    },
+    {
+      "Sid": "AllowEc2DescribeForGlueNetworkConnection",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeSubnets",
+        "ec2:DescribeVpcs",
+        "ec2:DescribeVpcAttribute",
+        "ec2:DescribeRouteTables",
+        "ec2:DescribeSecurityGroups",
+        "ec2:DescribeVpcEndpoints",
+        "ec2:DescribeNetworkInterfaces"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "AllowEc2EniLifecycleForGlue",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateNetworkInterface",
+        "ec2:DeleteNetworkInterface"
+      ],
+      "Resource": "*"
+    },
+    {
+      "__comment_AllowEniTagging": "DO NOT add a Condition (e.g. ec2:CreateAction = CreateNetworkInterface) to this statement. Glue's NETWORK connection flow calls CreateTags as a SEPARATE call AFTER CreateNetworkInterface, so that condition never matches and tagging fails silently. The Glue UI then reports the generic 'Test connection failed' with no useful diagnostics. The real error is only visible in CloudTrail under GlueJobRunnerSession.",
+      "Sid": "AllowEniTagging",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateTags",
+        "ec2:DeleteTags"
+      ],
+      "Resource": "arn:aws:ec2:<REGION>:<IE_ACCOUNT>:network-interface/*"
+    }
+  ]
+}
