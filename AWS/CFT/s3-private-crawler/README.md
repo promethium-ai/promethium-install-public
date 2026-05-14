@@ -1,133 +1,336 @@
-# Private S3 Access for Trino + Glue Crawlers
+# Private S3 Access for Trino + Glue Crawlers (Same-Account and Cross-Account)
 
-Documentation and the CloudFormation template that enable Promethium to connect to S3 privately using a VPC endpoint and Glue NETWORK connection. This setup ensures:
+This guide configures Promethium to access S3 buckets privately — in the same AWS account as the IE deployment, or in a different account — using a gateway VPC endpoint and a Glue NETWORK connection.
 
-1. No traffic to S3 goes over the public internet
-2. Access is restricted by VPC, IAM, and bucket policy
-3. Promethium does not require elevated IAM permissions
+The pattern guarantees:
 
-## Overview
-The IE Trino pod (via IRSA) and Glue crawlers share the same private path:
+1. S3 traffic stays on the AWS private network (no public internet hop).
+2. Access is restricted by VPC, IAM principal, and bucket policy.
+3. Promethium does not need elevated IAM permissions.
 
-Trino (EKS pod via IRSA) → HTTPS (private) → VPC route tables → S3 Gateway VPC Endpoint → Amazon S3
+---
 
-Glue crawlers use the same VPC path but additionally need:
-- A Glue network connection
-- A private subnet + security group
-- Permission to create Elastic Network Interfaces (ENIs)
+## Architecture
 
-## Prerequisites
-Before running the template you must already have:
+```
+Trino (EKS pod, IRSA)  ─┐
+                        ├──► VPC route table ──► S3 Gateway VPC Endpoint ──► Amazon S3
+Glue Crawler (NETWORK)  ─┘
+```
 
-- VPC ID used by the IE deployment.
-- Private subnet(s) for EKS and Glue (and their AZs).
-- Route tables associated with those subnets.
-- Security group that allows outbound HTTPS (TCP 443).
-- IAM roles for IRSA (Trino) and Glue crawler with permissions to read/write the target bucket.
- - Glue NETWORK connection ENI permissions (via role policies).
+Same-account: the bucket is in the IE account.
+Cross-account: the bucket lives in a *different* AWS account; the bucket policy in that account grants access to the IE account's role only when the request arrives via the IE account's VPCE.
 
-## Setup
-To establish the private VPC path you provision the following two resources in the AWS deployment where the IE is installed:
+---
 
-- **S3 Gateway VPC Endpoint**
-  - Attach to the desired route tables.
-  - Optionally apply a restrictive endpoint policy (e.g., limit to specific buckets or principals).
-- **Glue Network Connection**
-  - Bind to a public subnet (determines the AZ) and the security group that allows outbound HTTPS.
-  - Glue crawlers use this connection to reach S3 privately through the endpoint.
+## Prerequisites in the IE account
 
-### Deployment
+| Item | Notes |
+|---|---|
+| VPC ID | The VPC hosting the IE (EKS + Glue ENIs) |
+| Private subnet IDs and AZs | At least one private subnet for the Glue connection's ENI |
+| Route table IDs | The private route tables — the gateway endpoint will be attached to these |
+| Security group | Must allow outbound 443 and have an inbound self-reference rule (Glue requires this) |
+| IAM role for crawler runtime | Single role used by both Trino IRSA and Glue's crawler runtime (one role, two trust statements — see below) |
 
-`AWS/utilities/install_vpc_endpoint.sh` wraps the CloudFormation call with automated waiting and reporting:
+---
+
+## Step 1 — Configure the crawler runtime IAM role
+
+The role is assumed by:
+- the Trino pod via IRSA (`sts:AssumeRoleWithWebIdentity`)
+- Glue at crawler runtime (`sts:AssumeRole` for `glue.amazonaws.com`)
+
+### Trust policy
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EksOidcIrsa",
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::<IE_ACCOUNT>:oidc-provider/oidc.eks.<region>.amazonaws.com/id/<OIDC_PROVIDER_ID>"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "oidc.eks.<region>.amazonaws.com/id/<OIDC_PROVIDER_ID>:sub": "system:serviceaccount:intelligentedge:trino-sa"
+        }
+      }
+    },
+    {
+      "Sid": "AllowGlueService",
+      "Effect": "Allow",
+      "Principal": { "Service": "glue.amazonaws.com" },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+```
+
+### Required permissions (in addition to the base Trino/Glue policy)
+
+Attach an inline policy with the following statements. **Read the note on `ec2:CreateTags` below — it's the one that bites everyone.**
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowGetGlueConnection",
+      "Effect": "Allow",
+      "Action": ["glue:GetConnection", "glue:GetConnections"],
+      "Resource": [
+        "arn:aws:glue:<region>:<IE_ACCOUNT>:catalog",
+        "arn:aws:glue:<region>:<IE_ACCOUNT>:connection/*"
+      ]
+    },
+    {
+      "Sid": "AllowPassRoleToGlue",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::<IE_ACCOUNT>:role/<crawler-role-name>",
+      "Condition": { "StringEquals": { "iam:PassedToService": "glue.amazonaws.com" } }
+    },
+    {
+      "Sid": "AllowGlueCrawlerLogging",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents",
+        "logs:DescribeLogStreams",
+        "logs:DescribeLogGroups"
+      ],
+      "Resource": [
+        "arn:aws:logs:<region>:<IE_ACCOUNT>:log-group:/aws-glue/*",
+        "arn:aws:logs:<region>:<IE_ACCOUNT>:log-group:/aws-glue/*:*",
+        "arn:aws:logs:<region>:<IE_ACCOUNT>:log-group:/aws-glue/*:log-stream:*"
+      ]
+    },
+    {
+      "Sid": "AllowEc2DescribeForGlueNetworkConnection",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeSubnets",
+        "ec2:DescribeVpcs",
+        "ec2:DescribeVpcAttribute",
+        "ec2:DescribeRouteTables",
+        "ec2:DescribeSecurityGroups",
+        "ec2:DescribeVpcEndpoints",
+        "ec2:DescribeNetworkInterfaces"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "AllowEc2EniLifecycleForGlue",
+      "Effect": "Allow",
+      "Action": ["ec2:CreateNetworkInterface", "ec2:DeleteNetworkInterface"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "AllowEniTagging",
+      "Effect": "Allow",
+      "Action": ["ec2:CreateTags", "ec2:DeleteTags"],
+      "Resource": "arn:aws:ec2:<region>:<IE_ACCOUNT>:network-interface/*"
+    }
+  ]
+}
+```
+
+> **⚠ Critical: do NOT add a `Condition` block to `ec2:CreateTags`.** AWS docs sometimes recommend `"ec2:CreateAction": "CreateNetworkInterface"` as a security tightening, but Glue calls `CreateTags` as a **separate API call after the ENI is created** — the condition never matches and the tag fails. The crawler then surfaces the generic "Test connection failed for connection '...' and S3 Path '...'" with no useful diagnostics. (This is the single most common cause of unexplained Glue NETWORK-connection failures.)
+
+---
+
+## Step 2 — Deploy the VPC endpoint and Glue NETWORK connection
+
+### Option A: CloudFormation
 
 ```bash
 ./AWS/utilities/install_vpc_endpoint.sh \
   --region us-east-1 \
-  --stack-name s3-cross-account-permissions \
+  --stack-name promethium-s3-private-access \
   --template-file AWS/CFT/s3-private-crawler/promethium-vpc-s3-glue-connection.yaml \
   --parameters \
-    VpcId=vpc-06555a613f7aa0c8d \
-    RouteTableIds=rtb-0eeee506c49b048c8 \
-    SubnetId=subnet-0e5b016b329ce26c0 \
-    AvailabilityZone=us-east-1b \
-    SecurityGroupIds=sg-0172b181a9e901d39 \
+    VpcId=vpc-xxxxxxxxxxxxxxxxx \
+    RouteTableIds=rtb-xxxxxxxxxxxxxxxxx \
+    SubnetId=subnet-xxxxxxxxxxxxxxxxx \
+    AvailabilityZone=us-east-1a \
+    SecurityGroupIds=sg-xxxxxxxxxxxxxxxxx \
     AwsRegion=us-east-1 \
     AddEndpointPolicy=false \
     AllowedBucketArns='' \
     GlueConnectionName=promethium-glue-connection \
     GlueConnectionDescription="Glue network connection for Promethium crawler"
 ```
-After stack creation note the generated VPC endpoint ID (for your bucket policy) and the Glue connection name (to stitch into Promethium's glue-service deployment) -
 
-![](../../../images/vpc_endpoint_creation_for_s3.png)
+Capture the `S3GatewayEndpointId` from the outputs — you need it for the bucket policy.
 
-The script prints creation progress, lists the created resources on success, and reports failure reasons (exits non-zero) if the stack fails.
+### Option B: AWS Console
 
-If you need to delete the stack later, rerun the same script with `--delete-stack`:
+If the CFT can't run from your workstation, create the resources manually:
+
+1. **VPC console → Endpoints → Create endpoint**
+   - Service: `com.amazonaws.<region>.s3`, type **Gateway**
+   - VPC: the IE VPC
+   - Route tables: the private route table(s)
+   - Policy: Full access (default)
+2. **Glue console → Data Catalog → Connections → Create connection**
+   - Connection type: **Network**
+   - Name: `promethium-glue-connection`
+   - VPC: the IE VPC
+   - Subnet: a private subnet (note its AZ)
+   - Security group: the one with self-reference + outbound 443
+
+> **Pro tip — naming**: do not put spaces in the connection name. Spaces in Glue resource ARNs cause messy IAM resource conditions and audit confusion.
+
+---
+
+## Step 3 — S3 bucket policy
+
+Apply this in the bucket-owning account (same as IE for same-account, or the data-owner account for cross-account):
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowListBucketViaVpcEndpoint",
+      "Effect": "Allow",
+      "Principal": { "AWS": "arn:aws:iam::<IE_ACCOUNT>:role/<crawler-role-name>" },
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::<bucket>",
+      "Condition": {
+        "StringEquals": { "aws:SourceVpce": "<vpce-id-from-step-2>" }
+      }
+    },
+    {
+      "Sid": "AllowGetObjectViaVpcEndpoint",
+      "Effect": "Allow",
+      "Principal": { "AWS": "arn:aws:iam::<IE_ACCOUNT>:role/<crawler-role-name>" },
+      "Action": [
+        "s3:GetBucketLocation",
+        "s3:GetObject",
+        "s3:GetObjectVersion"
+      ],
+      "Resource": [
+        "arn:aws:s3:::<bucket>",
+        "arn:aws:s3:::<bucket>/*"
+      ],
+      "Condition": {
+        "StringEquals": { "aws:SourceVpce": "<vpce-id-from-step-2>" }
+      }
+    }
+  ]
+}
+```
+
+Notes:
+
+- **`s3:GetBucketLocation` is required** — Glue's S3 client looks up the bucket region before listing. Omitting this surfaces as the generic "Test connection failed."
+- If you want to scope to a specific prefix, add `"StringLike": {"s3:prefix": ["<prefix>", "<prefix>/", "<prefix>/*"]}` to the ListBucket statement's `Condition`. Be aware Glue may issue a prefix-less ListBucket during pre-flight, so leaving the condition off (or including the literal prefix you'll crawl) is safest.
+- For **cross-account** there is nothing extra to do beyond this policy — the VPCE ID is globally unique within AWS, so `aws:SourceVpce` works across account boundaries.
+
+---
+
+## Step 4 — Wire Promethium's `glue-crawler` deployment
+
+```bash
+kubectl set env deployment/glue-crawler -n intelligentedge \
+  GLUE_USE_VPC_CONNECTION=true \
+  GLUE_VPC_CONNECTION_NAME=promethium-glue-connection \
+  GLUE_CRAWLER_ROLE=<crawler-role-name>
+
+kubectl rollout status deployment/glue-crawler -n intelligentedge
+```
+
+> **⚠ Important**: `GLUE_CRAWLER_ROLE` must be the **role name** (no `arn:aws:iam:...:role/` prefix) of a role that actually exists in the account. Some Helm chart defaults reference a templated role name that may not be created — verify with `aws iam get-role --role-name <name>`.
+
+---
+
+## Step 5 — Validate
+
+### Independent network/IAM probe (proves the plumbing works regardless of Glue):
+
+```bash
+kubectl run -n intelligentedge tmp-awscli --rm -it \
+  --image=amazon/aws-cli:latest --restart=Never \
+  --overrides='{"spec":{"serviceAccountName":"trino-sa"}}' \
+  -- s3 ls s3://<bucket>/<prefix>/ --region <region>
+```
+
+This list should succeed when bucket policy + IAM + VPCE routing are all correct. (The console's "Test Connection" feature is unreliable for NETWORK connections and routinely fails silently even when the path is fully functional — don't trust it as the sole validation.)
+
+### Run a crawler
+
+Trigger a crawl from the Promethium UI on the configured S3 source. Confirm:
+
+```bash
+CRAWLER=$(aws glue list-crawlers --region <region> --query 'CrawlerNames[0]' --output text)
+aws glue get-crawler --region <region> --name "$CRAWLER" \
+  --query 'Crawler.{State:State,LastCrawl:LastCrawl}' --output json
+```
+
+Want `Status: SUCCEEDED` and `TablesCrawled > 0`.
+
+---
+
+## Troubleshooting
+
+### Generic "Test connection failed" — diagnose via CloudTrail
+
+AWS Glue's connection-test path swallows real errors and reports the generic message regardless of root cause. The actual error is recorded in CloudTrail under the `GlueJobRunnerSession` identity. Query it directly:
+
+```bash
+aws cloudtrail lookup-events --region <region> \
+  --start-time $(date -u -v-30M +%FT%TZ 2>/dev/null || date -u --date='30 minutes ago' +%FT%TZ) \
+  --max-results 200 --output json \
+  | jq '[.Events[] | .CloudTrailEvent | fromjson
+         | select(.userIdentity.sessionContext.sessionIssuer.userName == "<crawler-role-name>"
+                  and ((.userIdentity.arn // "") | contains("GlueJobRunnerSession")))
+         | {time:.eventTime, event:.eventName, src:.eventSource,
+            err:(.errorMessage // .errorCode // null),
+            res:(.requestParameters.bucketName // .requestParameters.name // "")}]
+       | sort_by(.time)'
+```
+
+Common errors and their fixes:
+
+| Error | Fix |
+|---|---|
+| `glue:GetConnection on resource: arn:aws:glue:...:connection/<name>` | Add `glue:GetConnection` to the role's policy on `connection/*` |
+| `iam:PassRole on resource: arn:aws:iam:...:role/<name>` | Add the `AllowPassRoleToGlue` statement to the role |
+| `Service Principal: glue.amazonaws.com is not authorized to perform: ec2:Describe...` | Add the `AllowEc2DescribeForGlueNetworkConnection` statement |
+| `ec2:CreateTags on resource: arn:aws:ec2:...:network-interface/...` | Add the unconditional `AllowEniTagging` statement (this is the recurring trap) |
+| `logs:PutLogEvents on resource: arn:aws:logs:...:log-group:/aws-glue/...` | Add the `AllowGlueCrawlerLogging` statement |
+| `Failed to call ec2:DescribeSubnets ... VPC Id not found for subnet ...` | The role lacks ENI describe perms; add `AllowEc2DescribeForGlueNetworkConnection` |
+| S3 `AccessDenied` | Bucket policy missing the role principal, wrong VPCE ID, or missing `s3:GetBucketLocation` |
+
+### "Test Connection failed" and CloudTrail is empty
+
+The role's trust policy is missing `Service: glue.amazonaws.com` — Glue can't assume the role to start the test job, so no API calls are ever made. Update the trust policy (Step 1).
+
+### Crawl hangs in STOPPING
+
+Normal for NETWORK connections — ENI teardown adds 1–3 minutes after the actual crawl finishes. Wait until `State: READY`, then check `LastCrawl`.
+
+---
+
+## Tear down
 
 ```bash
 ./AWS/utilities/install_vpc_endpoint.sh \
   --region us-east-1 \
-  --stack-name s3-cross-account-permissions \
+  --stack-name promethium-s3-private-access \
   --delete-stack
 ```
 
-The deletion path prints failure events (if any) and exits non-zero when the delete fails.
+If you also created any resources by hand (console), delete them in the console.
 
+---
 
-## Post-deployment
-- Update the S3 bucket policy so the VPC endpoint ID is allowed to access the bucket. 
+## CloudFormation template
 
-```json
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Sid": "AllowGlueListBucketViaVpcEndpoint",
-            "Effect": "Allow",
-            "Principal": {
-                "AWS": <role ARN for Trino OIDC role> eg - "arn:aws:iam::<account_id>:role/promethium-<env>-<tenant_name>-trino-oidc-role"
-            },
-            "Action": "s3:ListBucket",
-            "Resource": "arn:aws:s3:::pm61data3",
-            "Condition": {
-                "StringEquals": {
-                    "aws:SourceVpce": <VPC Endpoint id from above command's output eg- "vpce-0f932f36ee0ae56c6"
-                },
-                "StringLike": {
-                    "s3:prefix": [
-                        "<bucket prefix>",
-                        "<bucket prefix>/",
-                        "<bucket prefix>/*"
-                    ]
-                }
-            }
-        },
-        {
-            "Sid": "AllowGlueGetObjectViaVpcEndpoint",
-            "Effect": "Allow",
-            "Principal": {
-                "AWS": <role ARN for Trino OIDC role> eg - "arn:aws:iam::<account_id>:role/promethium-<env>-<tenant_name>-trino-oidc-role"
-            },
-            "Action": "s3:GetObject",
-            "Resource": "arn:aws:s3:::<bucketname>/<bucket prefix>/*",
-            "Condition": {
-                "StringEquals": {
-                    "aws:SourceVpce": <VPC Endpoint id from above command's output eg- "vpce-0f932f36ee0ae56c6"
-                }
-            }
-        }
-    ]
-}
-```
-
-- Update Promethium's glue-service deployment (and/or Glue crawler definition) with the Glue connection name from the stack.
-```json
-kubectl set env deployment/glue-crawler \
-  GLUE_USE_VPC_CONNECTION=true \
-  GLUE_VPC_CONNECTION_NAME="<connection name from above step>" \
-  -n intelligentedge
-  ```
-
-## Template location
-See `promethium-vpc-s3-glue-connection.yaml` in this folder for the Terraform template that provisions the endpoint and Glue connection resources.
+See `promethium-vpc-s3-glue-connection.yaml` in this folder. It provisions the gateway endpoint and the NETWORK connection.
