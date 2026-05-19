@@ -61,7 +61,7 @@ Once the customer has provided the prerequisite infrastructure and variables, th
 | Region | AWS region for deployment (e.g., `eu-central-1`) |
 | Install VM/jumpbox | An EC2 instance with an attached Security Group |
 | VPC | An existing VPC of at least `/22` CIDR |
-| Private Subnets | Minimum 3 private subnets across 3 availability zones (recommended: 4) — for EKS worker nodes and internal ALB |
+| Private Subnets | Minimum 2 private subnets across 2 availability zones (recommended: 3) — for EKS worker nodes and internal ALB |
 | Outbound Internet Access | The install VM and EKS nodes require outbound HTTPS access via NAT Gateway |
 | Company Name | A `${COMPANY_NAME}` variable used throughout the deployment — max 15 characters, lowercase, no spaces |
 | GitHub PAT | A GitHub Personal Access Token with `read:packages` scope (provided by Promethium) |
@@ -73,10 +73,10 @@ Your VPC must be at least a `/22` CIDR (e.g., `10.0.0.0/22`). Promethium uses an
 
 | Configuration | Private Subnets | AZs | Routing | Required Tags |
 |---|---|---|---|---|
-| **Required (minimum)** | 3 | 3 different AZs | NAT Gateway | `kubernetes.io/role/internal-elb=1` |
-| **Recommended** | 4 | 3+ different AZs | NAT Gateway | `kubernetes.io/role/internal-elb=1` |
+| **Required (minimum)** | 2 | 2 different AZs | NAT Gateway | `kubernetes.io/role/internal-elb=1` |
+| **Recommended** | 3 | 3 different AZs | NAT Gateway | `kubernetes.io/role/internal-elb=1` |
 
-> ⚠️ **Minimum 3 private subnets across 3 availability zones are required.** The internal ALB and EKS node groups both use these subnets. More subnets across more AZs improve availability and provide additional IP space for nodes.
+> ⚠️ **Minimum 2 private subnets across 2 availability zones are required.** The internal ALB and EKS node groups both use these subnets. More subnets across more AZs improve availability and provide additional IP space for nodes.
 
 > ⚠️ **EKS worker nodes must be placed in private subnets only.** Public subnets auto-assign public IPs to instances, which causes EKS node group creation to fail.
 
@@ -93,7 +93,7 @@ Your VPC must be at least a `/22` CIDR (e.g., `10.0.0.0/22`). Promethium uses an
 
 ### Required subnet tags
 
-All 3 private subnets must be tagged with the EKS cluster name **before** running Terraform:
+All private subnets must be tagged with the EKS cluster name **before** running Terraform:
 
 | Subnet type | Tag Key | Tag Value |
 |---|---|---|
@@ -527,7 +527,7 @@ The following sections describe the outputs collected above.
 |---|------|
 | 4 | VPC ID |
 | 5 | VPC CIDR block |
-| 6 | Private Subnet IDs (3 minimum, in different AZs) |
+| 6 | Private Subnet IDs (2 minimum, in different AZs) |
 
 ### Install VM
 
