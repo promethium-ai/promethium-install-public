@@ -158,9 +158,9 @@ for S in "${PRIVATE_SUBNETS[@]}"; do echo "       $S"; done
 echo "     Public subnets found:  ${#PUBLIC_SUBNETS[@]}"
 for S in "${PUBLIC_SUBNETS[@]}"; do echo "       $S"; done
 
-[ "${#PRIVATE_SUBNETS[@]}" -ge 3 ] \
-  && check_pass "At least 3 private subnets exist" \
-  || check_fail "Private subnets" "Only ${#PRIVATE_SUBNETS[@]} found — need at least 3 in different AZs for EKS"
+[ "${#PRIVATE_SUBNETS[@]}" -ge 2 ] \
+  && check_pass "At least 2 private subnets exist" \
+  || check_fail "Private subnets" "Only ${#PRIVATE_SUBNETS[@]} found — need at least 2 in different AZs for EKS"
 
 # TODO: public subnets are not strictly required — customers may provide their own connectivity (VPN, Direct Connect, etc.)
 [ "${#PUBLIC_SUBNETS[@]}" -ge 1 ] \
@@ -168,11 +168,11 @@ for S in "${PUBLIC_SUBNETS[@]}"; do echo "       $S"; done
   || check_warn "Public subnets" "No public subnets found — NAT Gateway requires a public subnet for EKS node outbound access"
 
 # Check private subnets are in different AZs
-if [ "${#PRIVATE_AZS[@]}" -ge 3 ]; then
+if [ "${#PRIVATE_AZS[@]}" -ge 2 ]; then
   UNIQUE_AZS=$(printf '%s\n' "${PRIVATE_AZS[@]}" | sort -u | wc -l)
-  [ "$UNIQUE_AZS" -ge 3 ] \
-    && check_pass "Private subnets span 3 availability zones" \
-    || check_fail "Private subnet AZs" "${UNIQUE_AZS} unique AZs found — EKS requires private subnets in 3 different AZs"
+  [ "$UNIQUE_AZS" -ge 2 ] \
+    && check_pass "Private subnets span 2 availability zones" \
+    || check_fail "Private subnet AZs" "${UNIQUE_AZS} unique AZs found — EKS requires private subnets in 2 different AZs"
 fi
 
 # ── 3. Subnet tags ────────────────────────────────────────────────────────────
