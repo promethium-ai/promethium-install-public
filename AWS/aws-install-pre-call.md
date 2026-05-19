@@ -1,0 +1,175 @@
+
+# Promethium Intelligent Edge AWS Pre-call Installation (Promethium Associate)
+
+This page documents instructions for the Promethium associate to complete pre-call instructions, before the main AWS install ([aws-install.md](aws-install.md)), but after the customer completes prerequisites ([`README.md`](README.md)).
+
+The instructions here create and configure a new branch for the customer from the Promethium associate's local machine.
+
+> ⚠️ **Run these commands on your local machine**
+
+- [Promethium Intelligent Edge AWS Pre-call Installation (Promethium Associate)](#promethium-intelligent-edge-aws-pre-call-installation-promethium-associate)
+  - [1. Create customer branch](#1-create-customer-branch)
+  - [2. Code changes](#2-code-changes)
+    - [2.1 Copy customer prerequisite outputs](#21-copy-customer-prerequisite-outputs)
+    - [2.2 Configure `backend.tf`](#22-configure-backendtf)
+    - [2.3 Create `terraform.tfvars`](#23-create-terraformtfvars)
+    - [2.4 Push changes](#24-push-changes)
+  - [3. Grant Cross-Account Trust](#3-grant-cross-account-trust)
+
+
+## 1. Create customer branch
+
+> Replace `<company_name>` with the customer's company name before running.
+
+```bash
+export COMPANY_NAME="<company_name>"
+```
+
+Create the customer branch:
+```bash
+git clone https://github.com/promethium-ai/promethium-internal-ie-aws.git
+cd promethium-internal-ie-aws
+git checkout main && git pull
+git checkout -b ${COMPANY_NAME}
+git push -u origin ${COMPANY_NAME}
+```
+
+---
+
+## 2. Code changes
+
+### 2.1 Copy customer prerequisite outputs
+
+First, copy `promethium-outputs-${COMPANY_NAME}.sh` (generated and sent by customer in [README.md Section 6](README.md#6-customer-information-required-by-promethium)) to your local machine.
+
+Then source it at the start of each terminal session, this allows us to substitute output variables like `TERRAFORM_ASSUME_ROLE_ARN`, `VPC_ID`, etc. in later files to configure the tenant's branch in `promethium-internal-ie-aws`.
+
+```bash
+# First, copy the customer output file or its contents to promethium-outputs-${COMPANY_NAME}.sh, in the editor of your choice, e.g.
+# vim promethium-outputs-${COMPANY_NAME}.sh
+
+# Then, source all the variables there
+source promethium-outputs-${COMPANY_NAME}.sh
+```
+
+### 2.2 Configure `backend.tf`
+
+```bash
+cat > backend.tf << EOF
+terraform {
+  backend "s3" {
+    bucket  = "pm61-iac-terraform-state"
+    key     = "prod/${COMPANY_NAME}/terraform.tfstate"
+    region  = "us-east-1"
+    use_lockfile = "false"
+    assume_role = {
+      role_arn = "arn:aws:iam::734236616923:role/promethium-terraform-saas-assume-role"
+    }
+  }
+}
+EOF
+```
+
+### 2.3 Create `terraform.tfvars`
+
+> After running the following command, replace `<image_tag>` in `terraform.tfvars` with the Promethium release version provided by Promethium.
+
+```bash
+cat > terraform.tfvars << EOF
+# ── Core ──────────────────────────────────────────────────────────────────────
+env          = "prod"
+company_name = "${COMPANY_NAME}"
+aws_region   = "${AWS_REGION}"
+
+# ── Terraform identity ────────────────────────────────────────────────────────
+terraform_assume_role_arn = "${TERRAFORM_ASSUME_ROLE_ARN}"
+
+# ── VPC (customer-provided) ───────────────────────────────────────────────────
+vpc_enabled = false
+
+vpc_info = {
+  vpc_id         = "${VPC_ID}"
+  # Private subnets only — do NOT include public subnets here
+  subnet_ids     = ["${SUBNET1_ID}", "${SUBNET2_ID}", "${SUBNET3_ID}"]
+  vpc_cidr_block = "${VPC_CIDR}"
+}
+
+# ── IAM ───────────────────────────────────────────────────────────────────────
+# All IAM roles pre-created by customer via operational_roles.yaml CFT
+iam_role_create      = false
+aws_iam_oidc_enabled = false
+
+cluster_role_arn                = "${EKS_CLUSTER_ROLE_ARN}"
+worker_role_arn                 = "${EKS_WORKER_ROLE_ARN}"
+aws_ebs_driver_role_arn         = "${EBS_CSI_ROLE_ARN}"
+aws_efs_driver_role_arn         = "${EFS_CSI_ROLE_ARN}"
+aws_lb_controller_role_arn      = "${LB_CONTROLLER_ROLE_ARN}"
+aws_eks_autoscaler_role_arn     = "${AUTOSCALER_ROLE_ARN}"
+pg_backup_cronjob_oidc_role_arn = "${PG_BACKUP_ROLE_ARN}"
+trino_oidc_role_arn             = "${TRINO_ROLE_ARN}"
+
+# ── EKS ───────────────────────────────────────────────────────────────────────
+custom_cluster_name = true
+eks_cluster_name    = "promethium-datafabric-prod-${COMPANY_NAME}-eks-cluster"
+eks_cluster_type    = "private"
+jumpbox_enabled     = false
+loadbalancer_type   = "internal"
+
+jumpbox_sg_id                 = "${JUMPBOX_SG_ID}"
+jumpbox_instance_profile_name = "${INSTANCE_PROFILE_NAME}"
+
+# ── Promethium application ────────────────────────────────────────────────────
+promethium_image_tag = "<image_tag>" # <-- REPLACE HERE e.g. 24.2.2
+
+# ── Tagging ───────────────────────────────────────────────────────────────────
+default_tags = {
+  Environment = "prod"
+  Product     = "Promethium"
+  Owner       = "support@promethium.ai"
+  created-by  = "Terraform"
+  Project     = "Intelligentedge"
+  persist     = "false"
+}
+EOF
+```
+
+> ⚠️ **`subnet_ids` must contain only private subnets.** EKS worker nodes are placed in these subnets. Public subnets auto-assign public IPs to instances and will cause the node group to fail.
+
+---
+
+### 2.4 Push changes
+
+
+```bash
+git add backend.tf terraform.tfvars promethium-outputs-${COMPANY_NAME}.sh
+git commit -m "Create new tenant: ${COMPANY_NAME}"
+git push origin ${COMPANY_NAME}
+```
+
+---
+
+## 3. Grant Cross-Account Trust
+
+> ⚠️ These commands must be run from your local machine where your AWS CLI is authenticated for dev + prod accounts ⚠️
+
+Promethium's two internal accounts need to trust the customer's deployment role so that:
+- The S3 Terraform state backend can be accessed (account `734236616923`)
+- The DynamoDB tenant lookup can run (account `308611924187`)
+
+Add `PromethiumDeploymentRole-${COMPANY_NAME}` to the trust policy of `promethium-terraform-saas-assume-role` in **both** accounts:
+
+> Replace `<734236616923-profile>` and `<308611924187-profile>` with your local AWS CLI profile names for each account.
+
+```bash
+# Account 734236616923 (S3 state backend)
+aws iam update-assume-role-policy --role-name promethium-terraform-saas-assume-role --policy-document "$(aws iam get-role --role-name promethium-terraform-saas-assume-role --query 'Role.AssumeRolePolicyDocument' --output json | jq '.Statement += [{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::'"${CUSTOMER_ACCOUNT_ID}"':role/PromethiumDeploymentRole-'"${COMPANY_NAME}"'"},"Action":"sts:AssumeRole","Condition":{"StringEquals":{"sts:ExternalId":"iac-terraform"}}}]')" --profile <734236616923-profile>
+
+# Account 308611924187 (DynamoDB tenant lookup)
+aws iam update-assume-role-policy --role-name promethium-terraform-saas-assume-role --policy-document "$(aws iam get-role --role-name promethium-terraform-saas-assume-role --query 'Role.AssumeRolePolicyDocument' --output json | jq '.Statement += [{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::'"${CUSTOMER_ACCOUNT_ID}"':role/PromethiumDeploymentRole-'"${COMPANY_NAME}"'"},"Action":"sts:AssumeRole","Condition":{"StringEquals":{"sts:ExternalId":"iac-terraform"}}}]')" --profile <308611924187-profile>
+```
+
+The DEV + PROD AWS accounts now trust the customer's role to create resources.
+
+---
+
+You have completed the pre-call setup for the customer's branch in `promethium-internal-ie-aws`. Get on a call with the customer — they will now follow the [AWS Install Guide](aws-install.md) with you on-call to guide them.
