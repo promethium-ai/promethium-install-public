@@ -12,7 +12,7 @@ Promethium Control Plane. The Promethium Control Plane is hosted and managed by 
 - Application orchestration
 - Application Telemetry
 
-Promethium Data Plane (Intelligent Edge). The Promethium Data Plane is installed within the customers cloud provider as a private cluster. The data plane has connectivity to all data platforms. This ensures all data remains within the customers private network. Data exposed to an end user flows directly from the data plane to the users browser requiring all users to be part of the the customers private network. No data is exposed to the Promethium Control Plane. Customer is responsible for the management and monitoring of the Data Plane infrastructure. Promethium is responsible for the Application layer management and monitoring. The scope of the Data Plane is;
+The Promethium Data Plane is installed within the customers cloud provider as a private cluster. The data plane has connectivity to all data platforms. This ensures all data remains within the customers private network. Data exposed to an end user flows directly from the data plane to the users browser requiring all users to be part of the the customers private network. By default, no data is shared with the Promethium Control Plane. Customer is responsible for the management and monitoring of the Data Plane infrastructure. Promethium is responsible for the Application layer management and monitoring. The scope of the Data Plane is;
 
 - Data Platform Connections
 - Metadata Discovery
