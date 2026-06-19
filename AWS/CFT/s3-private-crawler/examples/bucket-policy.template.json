@@ -1,0 +1,41 @@
+{
+  "__comment": "Apply this in the bucket-owning account. For same-account installs <IE_ACCOUNT> == bucket-owner. For cross-account the bucket owner is a different account, but the policy is identical -- aws:SourceVpce is globally unique within AWS, so the IE account's VPCE id works across account boundaries. s3:GetBucketLocation is required (Glue's S3 client looks up the bucket region before listing).",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowListBucketViaVpcEndpoint",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::<IE_ACCOUNT>:role/<CRAWLER_ROLE_NAME>"
+      },
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::<BUCKET>",
+      "Condition": {
+        "StringEquals": {
+          "aws:SourceVpce": "<VPCE_ID_FROM_STACK_OUTPUT>"
+        }
+      }
+    },
+    {
+      "Sid": "AllowGetObjectViaVpcEndpoint",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::<IE_ACCOUNT>:role/<CRAWLER_ROLE_NAME>"
+      },
+      "Action": [
+        "s3:GetBucketLocation",
+        "s3:GetObject",
+        "s3:GetObjectVersion"
+      ],
+      "Resource": [
+        "arn:aws:s3:::<BUCKET>",
+        "arn:aws:s3:::<BUCKET>/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:SourceVpce": "<VPCE_ID_FROM_STACK_OUTPUT>"
+        }
+      }
+    }
+  ]
+}

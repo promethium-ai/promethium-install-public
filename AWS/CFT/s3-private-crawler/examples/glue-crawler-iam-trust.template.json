@@ -1,0 +1,27 @@
+{
+  "__comment": "Trust policy for the crawler role. It must be assumable by BOTH the EKS OIDC provider (for the Trino pod via IRSA) AND the Glue service principal (for the crawler runtime). Replace <IE_ACCOUNT>, <REGION>, <OIDC_PROVIDER_ID>, and the namespace/service-account name as appropriate. See AWS/CFT/s3-private-crawler/README.md for context.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EksOidcIrsa",
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::<IE_ACCOUNT>:oidc-provider/oidc.eks.<REGION>.amazonaws.com/id/<OIDC_PROVIDER_ID>"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "oidc.eks.<REGION>.amazonaws.com/id/<OIDC_PROVIDER_ID>:sub": "system:serviceaccount:intelligentedge:trino-sa"
+        }
+      }
+    },
+    {
+      "Sid": "AllowGlueService",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "glue.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
