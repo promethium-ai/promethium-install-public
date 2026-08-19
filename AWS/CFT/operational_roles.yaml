@@ -13,6 +13,7 @@ Metadata:
           default: "EKS Role Configuration"
         Parameters:
           - CompanyName
+          - Environment
           - CustomClusterName
           - OIDCProviderUrl
           - EBSCSIDriverRoleName
@@ -33,6 +34,16 @@ Parameters:
   CompanyName:
     Type: String
     Description: Short company identifier (e.g. acme). Appended to all default role names to avoid conflicts when multiple Promethium deployments exist in the same account.
+
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues:
+      - dev
+      - qa
+      - preview
+      - prod
+    Description: Deployment environment. Used in the Glue/Trino default role name so it matches the workload's derived IRSA role name promethium-<Environment>-<CompanyName>-trino-oidc-role (the trino-sa ServiceAccount annotation set by the umbrella). Must equal the tenant env.
 
   CustomClusterName:
     Type: String
@@ -703,10 +714,10 @@ Resources:
   GlueTrinoServiceRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !If 
+      RoleName: !If
         - HasCustomGlueTrinoRoleName
         - !Ref GlueTrinoServiceRoleName
-        - !Sub 'promethium-prod-glue-trino-role-${CompanyName}'
+        - !Sub 'promethium-${Environment}-${CompanyName}-trino-oidc-role'
       AssumeRolePolicyDocument:
         Fn::Sub:
           - |
