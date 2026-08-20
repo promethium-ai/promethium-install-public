@@ -568,18 +568,24 @@ Resources:
               Service: ec2.amazonaws.com
             Action: sts:AssumeRole
           # Self-assume: Terraform's AWS provider chain-assumes this same role
-          # from the jumpbox (see terraform_assume_role_arn in tfvars). Today
-          # this is wired with a MANUAL `aws iam update-assume-role-policy`
-          # step documented in AWS/README.md step 1 — baked in here instead so
-          # no manual post-deploy step is required.
+          # from the jumpbox (see terraform_assume_role_arn in tfvars). The
+          # principal MUST be the account root, not the role's own ARN — at
+          # stack-create the role doesn't exist yet, so naming it as a principal
+          # makes IAM reject the trust policy ("Invalid principal in policy").
+          # The aws:PrincipalArn condition scopes it back to ONLY this role, so
+          # it's still self-assume-only, and it's valid at create (no manual
+          # post-deploy update-assume-role-policy needed).
           - Sid: SelfAssumeForProviderChaining
             Effect: Allow
             Principal:
-              AWS: !If
-                - HasCustomInstallRoleName
-                - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${PromethiumInstallRole}'
-                - !Sub 'arn:aws:iam::${AWS::AccountId}:role/promethium-${Environment}-${CompanyName}-terraform-deploy-role'
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
             Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:PrincipalArn: !If
+                  - HasCustomInstallRoleName
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${PromethiumInstallRole}'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/promethium-${Environment}-${CompanyName}-terraform-deploy-role'
       ManagedPolicyArns:
         # Restored vs. the hand-fork: the jumpbox security group (jumpbox.yaml)
         # opens NO inbound ports at all (only outbound 443/80) — SSM Session
