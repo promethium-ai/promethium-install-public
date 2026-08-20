@@ -5,6 +5,10 @@ Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label:
+          default: "Core (Required)"
+        Parameters:
+          - Environment
+      - Label:
           default: "Network (from network stack outputs)"
         Parameters:
           - VpcId
@@ -16,6 +20,8 @@ Metadata:
           - JumpboxInstanceType
           - UseExistingInstanceProfile
     ParameterLabels:
+      Environment:
+        default: "Environment (dev/qa/preview/prod)"
       VpcId:
         default: "VPC ID"
       PrivateSubnet1Id:
@@ -28,6 +34,18 @@ Metadata:
         default: "Existing EC2 Instance Profile Name to attach to Jumpbox"
 
 Parameters:
+  Environment:
+    Type: String
+    AllowedValues:
+      - dev
+      - qa
+      - preview
+      - prod
+    Description: >-
+      Deployment environment for this tenant. REQUIRED — no default. Stamped
+      as an Environment tag on this stack's resources; purely informational
+      (this template has no env-conditional behavior).
+
   VpcId:
     Type: AWS::EC2::VPC::Id
     Description: VPC ID — from the network stack output VpcId.
@@ -80,6 +98,8 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub ${JumpboxName}-sg
+        - Key: Environment
+          Value: !Ref Environment
 
   JumpboxInstance:
     Type: AWS::EC2::Instance
@@ -102,6 +122,8 @@ Resources:
       Tags:
         - Key: Name
           Value: !Ref JumpboxName
+        - Key: Environment
+          Value: !Ref Environment
 
 Outputs:
   JumpboxInstanceId:

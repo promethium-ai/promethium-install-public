@@ -1,0 +1,1634 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Promethium Intelligent Edge — Foundation stack for a customer-account install.
+  Canonical merge of install_role.yaml (Terraform deploy/install role), the
+  hand-validated Option-A deploy-role fork (least-privilege, self-contained,
+  in-account state), operational_roles.yaml (8 EKS/OIDC operational roles), and
+  tfstate-bootstrap.yaml (Terraform state bucket). Deploy this ONE stack once per
+  customer AWS account/company before running Terraform — it replaces the old
+  3-step install_role -> [run TF] -> operational_roles sequence with a single
+  up-front apply; Terraform itself later patches the operational roles' OIDC
+  trust policies to the real cluster once it exists (see the deploy role's
+  iam-operational-role-trust-mgmt inline policy).
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Core (Required)"
+        Parameters:
+          - CompanyName
+          - Environment
+      - Label:
+          default: "Deploy Role Configuration"
+        Parameters:
+          - PromethiumInstallRole
+      - Label:
+          default: "EKS / OIDC Configuration"
+        Parameters:
+          - CustomClusterName
+          - OIDCProviderUrl
+      - Label:
+          default: "Operational Role Name Overrides (Optional)"
+        Parameters:
+          - EBSCSIDriverRoleName
+          - EFSCSIDriverRoleName
+          - LoadBalancerControllerRoleName
+          - ClusterAutoscalerRoleName
+          - EKSClusterRoleName
+          - EKSWorkerNodeRoleName
+          - PGBackupServiceRoleName
+          - GlueTrinoServiceRoleName
+      - Label:
+          default: "Tagging Options"
+        Parameters:
+          - TagMode
+          - CustomTags
+    ParameterLabels:
+      CompanyName:
+        default: "Company Name"
+      Environment:
+        default: "Environment (dev/qa/preview/prod)"
+      PromethiumInstallRole:
+        default: "Promethium Terraform Deploy/Install Role Name"
+      CustomClusterName:
+        default: "Custom EKS Cluster Name"
+      OIDCProviderUrl:
+        default: "OIDC Provider URL"
+      TagMode:
+        default: "Tag Mode"
+      CustomTags:
+        default: "Custom Tags (Key=Value,Key2=Value2)"
+
+Parameters:
+  CompanyName:
+    Type: String
+    Description: Short company identifier (e.g. acme), lowercase, no spaces (recommended max 15 chars). Appended to all default role/policy names to avoid collisions when multiple Promethium tenants/environments share this AWS account. REQUIRED.
+
+  Environment:
+    Type: String
+    AllowedValues:
+      - dev
+      - qa
+      - preview
+      - prod
+    Description: >-
+      Deployment environment for this tenant. REQUIRED — no default, so a
+      stack can never silently provision prod-shaped names. Used throughout
+      the default role/policy names and the SecretsManager/registry resource
+      scoping below, and must equal the tenant's actual env: it drives the
+      Glue/Trino IRSA role name promethium-<Environment>-<CompanyName>-trino-oidc-role
+      that the umbrella's trino-sa ServiceAccount annotation expects.
+
+  PromethiumInstallRole:
+    Type: String
+    Default: ''
+    Description: >-
+      Custom name for the Terraform deploy/install role (optional — also the
+      name verifier_policy.yaml expects to attach to later). Leave blank to
+      use promethium-<Environment>-<CompanyName>-terraform-deploy-role.
+
+  CustomClusterName:
+    Type: String
+    Default: ''
+    Description: "Optional EKS cluster name override. Leave blank to use the default format promethium-datafabric-<Environment>-<CompanyName>-eks-cluster."
+
+  OIDCProviderUrl:
+    Type: String
+    Default: oidc.eks.us-east-1.amazonaws.com/id/DUMMY1234567890
+    Description: >-
+      OIDC Provider URL for the EKS cluster. Leave at the dummy default for
+      this initial Foundation deploy — Terraform creates the real cluster and
+      OIDC provider afterwards, then patches these operational roles' trust
+      policies to the real URL via iam:UpdateAssumeRolePolicy (granted below).
+
+  EBSCSIDriverRoleName:
+    Type: String
+    Default: ''
+    Description: Custom name for EBS CSI Driver role (optional)
+
+  EFSCSIDriverRoleName:
+    Type: String
+    Default: ''
+    Description: Custom name for EFS CSI Driver role (optional)
+
+  LoadBalancerControllerRoleName:
+    Type: String
+    Default: ''
+    Description: Custom name for Load Balancer Controller role (optional)
+
+  ClusterAutoscalerRoleName:
+    Type: String
+    Default: ''
+    Description: Custom name for Cluster Autoscaler role (optional)
+
+  EKSClusterRoleName:
+    Type: String
+    Default: ''
+    Description: Custom name for EKS Cluster role (optional)
+
+  EKSWorkerNodeRoleName:
+    Type: String
+    Default: ''
+    Description: Custom name for EKS Worker Node role (optional)
+
+  PGBackupServiceRoleName:
+    Type: String
+    Default: ''
+    Description: Custom name for PostgreSQL Backup Service role (optional)
+
+  GlueTrinoServiceRoleName:
+    Type: String
+    Default: ''
+    Description: Custom name for Glue Trino Service role (optional)
+
+  TagMode:
+    Type: String
+    Default: default
+    AllowedValues:
+      - default
+      - custom
+    Description: Choose whether to use default tags or user-supplied custom tags (operational roles). The deploy role and state bucket always carry the standard tag set.
+
+  CustomTags:
+    Type: String
+    Default: ""
+    Description: "Custom tags in Key=Value,Key2=Value2 format (used only when TagMode=custom)"
+
+Mappings:
+  DefaultTags:
+    Values:
+      Product: Promethium
+      Owner: support@promethium.ai
+      createdBy: CloudFormation
+      Project: Intelligentedge
+
+Conditions:
+  HasCustomInstallRoleName: !Not [!Equals [!Ref PromethiumInstallRole, '']]
+  HasCustomClusterName: !Not [!Equals [!Ref CustomClusterName, '']]
+  HasCustomEBSRoleName: !Not [!Equals [!Ref EBSCSIDriverRoleName, '']]
+  HasCustomEFSRoleName: !Not [!Equals [!Ref EFSCSIDriverRoleName, '']]
+  HasCustomLBRoleName: !Not [!Equals [!Ref LoadBalancerControllerRoleName, '']]
+  HasCustomCARoleName: !Not [!Equals [!Ref ClusterAutoscalerRoleName, '']]
+  HasCustomEKSClusterRoleName: !Not [!Equals [!Ref EKSClusterRoleName, '']]
+  HasCustomEKSWorkerRoleName: !Not [!Equals [!Ref EKSWorkerNodeRoleName, '']]
+  HasCustomPGBackupRoleName: !Not [!Equals [!Ref PGBackupServiceRoleName, '']]
+  HasCustomGlueTrinoRoleName: !Not [!Equals [!Ref GlueTrinoServiceRoleName, '']]
+
+Resources:
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Terraform state bucket (single source — from tfstate-bootstrap.yaml)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  TfStateBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub 'promethium-tfstate-${AWS::AccountId}'
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256   # SSE-S3 (no KMS dependency for the deploy role)
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Company
+          Value: !Ref CompanyName
+        - Key: Product
+          Value: !FindInMap [DefaultTags, Values, Product]
+        - Key: Project
+          Value: !FindInMap [DefaultTags, Values, Project]
+
+  # Refuse any non-TLS access — the bucket holds terraform state AND the
+  # agent cert-bundle private key (_<co>-bundle/tls.key).
+  TfStateBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref TfStateBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !GetAtt TfStateBucket.Arn
+              - !Sub '${TfStateBucket.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Terraform deploy/install role — based on the WORKING hand-fork
+  # (promethium-terraform-deploy-role-A.yaml), not the stale install_role.yaml.
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  TerraformVPCNetworkPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub 'promethium-${Environment}-${CompanyName}-terraform-vpc-network-policy'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: VPCModifyResources
+            Effect: Allow
+            Action:
+              - ec2:CreateVpc
+              - ec2:DeleteVpc
+              - ec2:ModifyVpcAttribute
+              - ec2:EnableVpcClassicLink
+              - ec2:DisableVpcClassicLink
+              - ec2:EnableVpcClassicLinkDnsSupport
+            Resource: '*'
+          - Sid: SubnetModifyResources
+            Effect: Allow
+            Action:
+              - ec2:CreateSubnet
+              - ec2:DeleteSubnet
+              - ec2:ModifySubnetAttribute
+            Resource: '*'
+          - Sid: InternetAndNatGateway
+            Effect: Allow
+            Action:
+              - ec2:CreateInternetGateway
+              - ec2:DeleteInternetGateway
+              - ec2:AttachInternetGateway
+              - ec2:DetachInternetGateway
+              - ec2:CreateNatGateway
+              - ec2:DeleteNatGateway
+            Resource: '*'
+          - Sid: RouteTableActions
+            Effect: Allow
+            Action:
+              - ec2:CreateRouteTable
+              - ec2:DeleteRouteTable
+              - ec2:CreateRoute
+              - ec2:DeleteRoute
+              - ec2:AssociateRouteTable
+              - ec2:DisassociateRouteTable
+            Resource: '*'
+          - Sid: SecurityGroupActions
+            Effect: Allow
+            Action:
+              - ec2:CreateSecurityGroup
+              - ec2:DeleteSecurityGroup
+              - ec2:AuthorizeSecurityGroupIngress
+              - ec2:RevokeSecurityGroupIngress
+              - ec2:AuthorizeSecurityGroupEgress
+              - ec2:RevokeSecurityGroupEgress
+            Resource:
+              - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*'
+              - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:vpc/*'
+          - Sid: ElasticIPActions
+            Effect: Allow
+            Action:
+              - ec2:AllocateAddress
+              - ec2:ReleaseAddress
+              - ec2:AssociateAddress
+              - ec2:DisassociateAddress
+            Resource: !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:elastic-ip/*'
+          - Sid: VPCDescribeResources
+            Effect: Allow
+            Action:
+              - ec2:DescribeVpcs
+              - ec2:DescribeSubnets
+              - ec2:DescribeInternetGateways
+              - ec2:DescribeNatGateways
+              - ec2:DescribeRouteTables
+              - ec2:DescribeAddresses
+              - ec2:DescribeAddressesAttribute
+              - ec2:DescribeVpcAttribute
+              - ec2:DescribeVpcClassicLink
+              - ec2:DescribeVpcClassicLinkDnsSupport
+              - ec2:DescribeAvailabilityZones
+              - ec2:DescribeSecurityGroups
+            Resource: '*'
+
+  TerraformEC2Policy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub 'promethium-${Environment}-${CompanyName}-terraform-ec2-policy'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EC2CoreActions
+            Effect: Allow
+            Action:
+              - ec2:AttachVolume
+              - ec2:CreateLaunchTemplate
+              - ec2:CreateLaunchTemplateVersion
+              - ec2:DeleteLaunchTemplate
+              - ec2:CreateKeyPair
+              - ec2:DeleteKeyPair
+              - ec2:CreateVolume
+              - ec2:AttachNetworkInterface
+              - ec2:DetachNetworkInterface
+              - ec2:DeleteNetworkInterface
+              - ec2:ModifyInstanceAttribute
+              - ec2:RunInstances
+              - ec2:TerminateInstances
+              - ec2:DetachVolume
+              - ec2:CreateNetworkInterface
+            Resource:
+              - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*'
+              - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:launch-template/*'
+              - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:key-pair/*'
+              - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:volume/*'
+              - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*'
+              - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*'
+              - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:subnet/*'
+              - !Sub 'arn:aws:ec2:${AWS::Region}::image/*'
+          - Sid: EC2DescribeActions
+            Effect: Allow
+            Action:
+              - ec2:DescribeInstances
+              - ec2:DescribeInstanceStatus
+              - ec2:DescribeInstanceAttribute
+              - ec2:DescribeInstanceTypes
+              - ec2:DescribeIamInstanceProfileAssociations
+              - ec2:DescribeInstanceCreditSpecifications
+              - ec2:DescribeVolumes
+              - ec2:DescribeVolumesModifications
+              - ec2:DescribeKeyPairs
+              - ec2:DescribeLaunchTemplates
+              - ec2:DescribeLaunchTemplateVersions
+              - ec2:DescribeImages
+              - ec2:DescribeNetworkInterfaces
+              - ec2:DescribeTags
+            Resource: '*'
+          - Sid: EC2Tagging
+            Effect: Allow
+            Action:
+              - ec2:CreateTags
+              - ec2:DeleteTags
+            Resource: '*'
+          - Sid: SSMParameter
+            Effect: Allow
+            Action:
+              - ssm:GetParameter
+            Resource: !Sub 'arn:aws:ssm:${AWS::Region}::parameter/aws/service/eks/optimized-ami/*/amazon-linux-*/recommended/release_version'
+
+  TerraformEKSPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub 'promethium-${Environment}-${CompanyName}-terraform-eks-policy'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EKSPermissions
+            Effect: Allow
+            Action:
+              - eks:UpdateClusterVersion
+              - eks:ListNodegroups
+              - eks:UntagResource
+              - eks:ListTagsForResource
+              - eks:UpdateClusterConfig
+              - eks:CreateNodegroup
+              - eks:DeleteCluster
+              - eks:CreateFargateProfile
+              - eks:UpdateNodegroupVersion
+              - eks:ListFargateProfiles
+              - eks:DescribeNodegroup
+              - eks:ListUpdates
+              - eks:DeleteNodegroup
+              - eks:DescribeUpdate
+              - eks:TagResource
+              - eks:UpdateNodegroupConfig
+              - eks:DescribeCluster
+              - eks-auth:AssumeRoleForPodIdentity
+              - iam:PassRole
+              - iam:GetRole
+              - iam:ListAttachedRolePolicies
+            Resource:
+              # NOTE (fixed during merge): the hand-fork scoped this to
+              # role/${EnvironmentName}-eks-cluster-role /-worker-role, which
+              # does not match the actual operational-role names this same
+              # template produces (promethium-${Environment}-${CompanyName}-eks-*-role,
+              # see rule 3). Corrected to reference the real names below —
+              # see foundation-review.md.
+              - !Sub 'arn:aws:eks:${AWS::Region}:${AWS::AccountId}:cluster/promethium*'
+              - !Sub 'arn:aws:eks:${AWS::Region}:${AWS::AccountId}:nodegroup/promethium*/*/*'
+              - !Sub 'arn:aws:iam::${AWS::AccountId}:role/promethium-${Environment}-${CompanyName}-eks-cluster-role'
+              - !Sub 'arn:aws:iam::${AWS::AccountId}:role/promethium-${Environment}-${CompanyName}-eks-worker-role'
+          - Sid: EKSCreatePermissions
+            Effect: Allow
+            Action:
+              - eks:ListClusters
+              - eks:CreateCluster
+            Resource: !Sub 'arn:aws:eks:${AWS::Region}:${AWS::AccountId}:cluster/*'
+          - Sid: IAMServiceLinkedRole
+            Effect: Allow
+            Action:
+              - iam:CreateServiceLinkedRole
+              - iam:DeleteServiceLinkedRole
+              - iam:GetRole
+            Resource: '*'
+            Condition:
+              StringEquals:
+                iam:AWSServiceName:
+                  - eks.amazonaws.com
+                  - glue.amazonaws.com
+                  - eks-nodegroup.amazonaws.com
+                  - eks-addons.amazonaws.com
+          - Sid: IAMGetRoleForEKS
+            Effect: Allow
+            Action: iam:GetRole
+            Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/promethium-*'
+          - Sid: OIDCProviderManagement
+            Effect: Allow
+            Action:
+              - iam:CreateOpenIDConnectProvider
+              - iam:TagOpenIDConnectProvider
+              - iam:GetOpenIDConnectProvider
+              - iam:DeleteOpenIDConnectProvider
+            Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:oidc-provider/*'
+
+  TerraformS3Policy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub 'promethium-${Environment}-${CompanyName}-terraform-s3-policy'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: KMSKeyManagement
+            Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:Encrypt
+              - kms:GenerateDataKey
+              - kms:DescribeKey
+              - kms:ReEncrypt*
+            Resource: !Sub 'arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*'
+          - Sid: KMSKeyOperations
+            Effect: Allow
+            Action:
+              - kms:EnableKeyRotation
+              - kms:EnableKey
+              - kms:Decrypt
+              - kms:ListKeyPolicies
+              - kms:UntagResource
+              - kms:PutKeyPolicy
+              - kms:GetKeyPolicy
+              - kms:Verify
+              - kms:ListResourceTags
+              - kms:DisableKey
+              - kms:DisableKeyRotation
+              - kms:TagResource
+              - kms:Encrypt
+              - kms:GetKeyRotationStatus
+              - kms:ScheduleKeyDeletion
+              - kms:CreateAlias
+              - kms:DescribeKey
+              - kms:Sign
+              - kms:DeleteAlias
+            Resource:
+              - !Sub 'arn:aws:kms:${AWS::Region}:${AWS::AccountId}:alias/*'
+              - !Sub 'arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*'
+          - Sid: S3BucketManagement
+            Effect: Allow
+            Action:
+              - s3:CreateBucket
+              - s3:ListBucket
+              - s3:GetBucketLocation
+              - s3:DeleteBucket
+            Resource:
+              - arn:aws:s3:::*-trino-*
+              - arn:aws:s3:::*-postgres-backups-*
+          - Sid: S3BucketConfiguration
+            Effect: Allow
+            Action:
+              - s3:PutEncryptionConfiguration
+              - s3:GetEncryptionConfiguration
+              - s3:GetLifecycleConfiguration
+              - s3:GetBucketTagging
+              - s3:PutBucketTagging
+              - s3:PutLifecycleConfiguration
+              - s3:PutBucketPolicy
+              - s3:GetBucketVersioning
+              - s3:DeleteBucketPolicy
+              - s3:GetBucketPolicy
+              - s3:PutBucketVersioning
+            Resource:
+              - arn:aws:s3:::*-trino-*
+              - arn:aws:s3:::*-postgres-backups-*
+          - Sid: S3BucketRead
+            Effect: Allow
+            Action:
+              - s3:GetAccelerateConfiguration
+              - s3:GetBucket*
+              - s3:GetReplicationConfiguration
+            Resource:
+              - arn:aws:s3:::*-trino-*
+              - arn:aws:s3:::*-postgres-backups-*
+          - Sid: S3ListOperations
+            Effect: Allow
+            Action: s3:List*
+            Resource:
+              - arn:aws:s3:::*-trino-*
+              - arn:aws:s3:::*-postgres-backups-*
+          - Sid: KMSCreateOperations
+            Effect: Allow
+            Action:
+              - kms:CreateKey
+              - kms:ListAliases
+            Resource: '*'
+
+  TerraformEFSPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub 'promethium-${Environment}-${CompanyName}-terraform-efs-policy'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EFSPermissions
+            Effect: Allow
+            Action:
+              - elasticfilesystem:ModifyMountTargetSecurityGroups
+              - elasticfilesystem:DescribeMountTargets
+              - elasticfilesystem:UntagResource
+              - elasticfilesystem:CreateMountTarget
+              - elasticfilesystem:DescribeLifecycleConfiguration
+              - elasticfilesystem:DescribeAccessPoints
+              - elasticfilesystem:DescribeFileSystems
+              - elasticfilesystem:DeleteMountTarget
+              - elasticfilesystem:DeleteFileSystem
+              - elasticfilesystem:DescribeMountTargetSecurityGroups
+              - elasticfilesystem:TagResource
+            Resource:
+              - !Sub 'arn:aws:elasticfilesystem:${AWS::Region}:${AWS::AccountId}:access-point/*'
+              - !Sub 'arn:aws:elasticfilesystem:${AWS::Region}:${AWS::AccountId}:file-system/*'
+          - Sid: EFSCreatePermissions
+            Effect: Allow
+            Action: elasticfilesystem:CreateFileSystem
+            Resource: '*'
+
+  TerraformELBPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub 'promethium-${Environment}-${CompanyName}-terraform-elb-policy'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: VisualEditor0
+            Effect: Allow
+            Action:
+              - elasticloadbalancing:DescribeLoadBalancerAttributes
+              - elasticloadbalancing:DescribeLoadBalancers
+              - elasticloadbalancing:DescribeTags
+            Resource: '*'
+
+  TerraformACMPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub 'promethium-${Environment}-${CompanyName}-terraform-acm-policy'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: ACMCertGetPermissions
+            Effect: Allow
+            Action:
+              - acm:RequestCertificate
+              - acm:ListCertificates
+              - acm:GetCertificate
+            Resource: '*'
+          - Sid: ACMCertCreatePermissions
+            Effect: Allow
+            Action:
+              - acm:DeleteCertificate
+              - acm:DescribeCertificate
+              - acm:AddTagsToCertificate
+              - acm:ListTagsForCertificate
+            Resource: !Sub 'arn:aws:acm:${AWS::Region}:${AWS::AccountId}:certificate/*'
+
+  TerraformGluePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub 'promethium-${Environment}-${CompanyName}-terraform-glue-policy'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: GlueDatabaseManagement
+            Effect: Allow
+            Action:
+              - glue:CreateDatabase
+              - glue:DeleteDatabase
+              - glue:UpdateDatabase
+              - glue:GetDatabase
+              - glue:GetDatabases
+            Resource:
+              - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:database/*_trino'
+              - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:database/*_trino*/*'
+              - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/*trino*/*'
+              - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:userDefinedFunction/*trino*/*'
+              - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:catalog'
+          - Sid: GlueCatalogAccess
+            Effect: Allow
+            Action:
+              - glue:GetTags
+              - glue:TagResource
+            Resource:
+              - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:catalog'
+              - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:database/*_trino'
+          - Sid: GlueReadOnlyAccess
+            Effect: Allow
+            Action:
+              - glue:GetDatabase
+              - glue:GetDatabases
+            Resource: '*'
+
+  TerraformInstallRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !If
+        - HasCustomInstallRoleName
+        - !Ref PromethiumInstallRole
+        - !Sub 'promethium-${Environment}-${CompanyName}-terraform-deploy-role'
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # Jumpbox EC2 instance profile trust (base install_role.yaml model —
+          # the hand-fork used a human OperatorPrincipalArn instead since it
+          # was tested "local-as-customer"; we keep the jumpbox/instance-profile
+          # model here per the merge brief, so the instance profile is preserved
+          # below and this is a service-principal trust, not a human principal).
+          - Sid: EC2InstanceProfileTrust
+            Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+          # Self-assume: Terraform's AWS provider chain-assumes this same role
+          # from the jumpbox (see terraform_assume_role_arn in tfvars). Today
+          # this is wired with a MANUAL `aws iam update-assume-role-policy`
+          # step documented in AWS/README.md step 1 — baked in here instead so
+          # no manual post-deploy step is required.
+          - Sid: SelfAssumeForProviderChaining
+            Effect: Allow
+            Principal:
+              AWS: !If
+                - HasCustomInstallRoleName
+                - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${PromethiumInstallRole}'
+                - !Sub 'arn:aws:iam::${AWS::AccountId}:role/promethium-${Environment}-${CompanyName}-terraform-deploy-role'
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        # Restored vs. the hand-fork: the jumpbox security group (jumpbox.yaml)
+        # opens NO inbound ports at all (only outbound 443/80) — SSM Session
+        # Manager is the only way to reach the instance, so this is required,
+        # not optional, once we're back on the jumpbox/instance-profile model.
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - !Ref TerraformVPCNetworkPolicy
+        - !Ref TerraformEC2Policy
+        - !Ref TerraformEKSPolicy
+        - !Ref TerraformS3Policy
+        - !Ref TerraformEFSPolicy
+        - !Ref TerraformELBPolicy
+        - !Ref TerraformACMPolicy
+        - !Ref TerraformGluePolicy
+      Policies:
+        - PolicyName: registry-invoke
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: RegistryInvoke
+                Effect: Allow
+                Action: execute-api:Invoke
+                Resource: 'arn:aws:execute-api:*:*:ol77z8v5j2/*'
+        - PolicyName: gitops-secret-bundles
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: SecretsManagerBundles   # tightened from the hand-fork's secretsmanager:* wildcard — see foundation-review.md
+                Effect: Allow
+                Action:
+                  - secretsmanager:CreateSecret
+                  - secretsmanager:PutSecretValue
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:TagResource
+                  - secretsmanager:UntagResource
+                  - secretsmanager:DeleteSecret
+                  - secretsmanager:GetResourcePolicy
+                  - secretsmanager:PutResourcePolicy
+                Resource: !Sub 'arn:aws:secretsmanager:*:*:secret:${Environment}/ie/${CompanyName}/*'
+              - Sid: SecretsManagerAccountLevel   # ListSecrets/GetRandomPassword do not support resource-level scoping
+                Effect: Allow
+                Action:
+                  - secretsmanager:ListSecrets
+                  - secretsmanager:GetRandomPassword
+                Resource: "*"
+        - PolicyName: tfstate-bucket
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: StateObjectOps
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:GetObjectVersion
+                  - s3:DeleteObjectVersion
+                Resource: !Sub 'arn:aws:s3:::promethium-tfstate-${AWS::AccountId}/*'
+              - Sid: StateBucketOps
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:ListBucketVersions
+                  - s3:GetBucketLocation
+                  - s3:GetBucketVersioning
+                Resource: !Sub 'arn:aws:s3:::promethium-tfstate-${AWS::AccountId}'
+        - PolicyName: iam-module-roles
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # The promethium module creates its own IAM roles inline (argocd_bootstrap
+              # ie_tf_runner + eso, ecr-refresher, etc.). Scoped to the promethium-*/
+              # ${CompanyName}-* namespaces — NOT account-wide. End-state is module-side
+              # BYO support (no customer iam:CreateRole); carried over from the hand-fork.
+              - Sid: ModuleRoleMgmt
+                Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:CreatePolicy
+                  - iam:DeletePolicy
+                  - iam:CreatePolicyVersion
+                  - iam:DeletePolicyVersion
+                  - iam:GetRole
+                  - iam:GetRolePolicy
+                  - iam:GetPolicy
+                  - iam:GetPolicyVersion
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                  - iam:ListPolicyVersions
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:TagPolicy
+                  - iam:PassRole
+                  - iam:CreateServiceLinkedRole
+                Resource:
+                  # Scoped to this tenant (company appears in every role/policy this
+                  # deploy role creates: promethium-<env>-<co>-*, promethium-ie-*-<env>-<co>).
+                  # NOT account-wide promethium-* — that would let one tenant's deploy
+                  # role manage another tenant's roles in a shared account.
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/promethium-*${CompanyName}*'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${CompanyName}-*'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:policy/promethium-*${CompanyName}*'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:policy/${CompanyName}-*'
+        - PolicyName: iam-operational-role-trust-mgmt
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # New per merge rule 2: TF's modify_iam_oidc_role_trust_policy reads
+              # and updates the 8 operational roles' trust policies post-cluster
+              # (they're created above with the dummy OIDCProviderUrl and need to
+              # be patched to the real OIDC provider once the cluster exists).
+              - Sid: OperationalRoleTrustAndPassRole
+                Effect: Allow
+                Action:
+                  - iam:GetRole
+                  - iam:GetRolePolicy
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                  - iam:UpdateAssumeRolePolicy
+                  - iam:PassRole
+                Resource:
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/promethium-*-${CompanyName}*'
+        - PolicyName: self-assume-chain
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Completes the self-assume trust statement above: the trust
+              # policy alone only says WHO may assume this role. The caller
+              # (this same role, running on the jumpbox via the instance
+              # profile) also needs an identity-policy grant allowing IT to
+              # call sts:AssumeRole against this role's own ARN. Not one of
+              # rule 2's 4 named permission bullets — added because the trust
+              # policy's self-assume statement is non-functional without it;
+              # see foundation-review.md.
+              - Sid: SelfAssumeIdentityGrant
+                Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !If
+                  - HasCustomInstallRoleName
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${PromethiumInstallRole}'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/promethium-${Environment}-${CompanyName}-terraform-deploy-role'
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Company
+          Value: !Ref CompanyName
+        - Key: Product
+          Value: !FindInMap [DefaultTags, Values, Product]
+        - Key: Owner
+          Value: !FindInMap [DefaultTags, Values, Owner]
+        - Key: createdBy
+          Value: !FindInMap [DefaultTags, Values, createdBy]
+        - Key: Project
+          Value: !FindInMap [DefaultTags, Values, Project]
+
+  TerraformInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub '${TerraformInstallRole}-instance-profile'
+      Path: /
+      Roles:
+        - !Ref TerraformInstallRole
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Tag resolver (Lambda-backed custom resource) — from operational_roles.yaml
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  TagResolverFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Path: "/"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  TagResolverFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Timeout: 30
+      Role: !GetAtt TagResolverFunctionRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import cfnresponse
+
+          def lambda_handler(event, context):
+              try:
+                  props = event.get("ResourceProperties", {})
+                  tag_mode = props.get("TagMode", "default")
+                  default_tags = props.get("DefaultTags", {})
+                  custom_tags = props.get("CustomTags", "")
+
+                  tags = []
+
+                  if isinstance(default_tags, dict):
+                      for k, v in default_tags.items():
+                          tags.append({"Key": k, "Value": v})
+
+                  if tag_mode == "custom" and isinstance(custom_tags, str) and custom_tags.strip() != "":
+                      pairs = custom_tags.split(",")
+                      for pair in pairs:
+                          if "=" in pair:
+                              k, v = pair.split("=", 1)
+                              tags.append({"Key": k.strip(), "Value": v.strip()})
+
+                  response_data = {"Tags": tags}
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
+
+              except Exception as e:
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {"Error": str(e)})
+
+  TagResolver:
+    Type: Custom::TagResolver
+    Properties:
+      ServiceToken: !GetAtt TagResolverFunction.Arn
+      TagMode: !Ref TagMode
+      DefaultTags:
+        # Environment/Company now come from the real parameters (fixed during
+        # merge — operational_roles.yaml previously pulled a static "prod"
+        # literal from the Mappings block regardless of the Environment
+        # parameter's actual value; see foundation-review.md).
+        Environment: !Ref Environment
+        Company: !Ref CompanyName
+        Product: !FindInMap [DefaultTags, Values, Product]
+        Owner: !FindInMap [DefaultTags, Values, Owner]
+        createdBy: !FindInMap [DefaultTags, Values, createdBy]
+        Project: !FindInMap [DefaultTags, Values, Project]
+      CustomTags: !Ref CustomTags
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 8 operational roles — from operational_roles.yaml, copied verbatim except
+  # default role names are now env-aware: promethium-${Environment}-${CompanyName}-<role>
+  # (dropping the hardcoded -prod-). Trust `sub` conditions and policies are
+  # otherwise EXACTLY as before — only the RoleName string changes.
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  EBSCSIDriverRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !If
+        - HasCustomEBSRoleName
+        - !Ref EBSCSIDriverRoleName
+        - !Sub 'promethium-${Environment}-${CompanyName}-ebs-csi-driver-role'
+      AssumeRolePolicyDocument:
+        Fn::Sub:
+          - |
+            {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Principal": {
+                    "Federated": "arn:aws:iam::${AWS::AccountId}:oidc-provider/${OIDCProviderUrl}"
+                  },
+                  "Action": "sts:AssumeRoleWithWebIdentity",
+                  "Condition": {
+                    "StringEquals": {
+                      "${OIDCProviderUrl}:sub": "system:serviceaccount:kube-system:ebs-csi-controller-sa"
+                    }
+                  }
+                }
+              ]
+            }
+          - OIDCProviderUrl: !Ref OIDCProviderUrl
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy
+      Path: /
+      Tags: !GetAtt TagResolver.Tags
+      Policies:
+        - PolicyName: EBSCSIKMSPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - kms:CreateGrant
+                  - kms:ListGrants
+                  - kms:RevokeGrant
+                Condition:
+                  Bool:
+                    kms:GrantIsForAWSResource: 'true'
+                Effect: Allow
+                Resource: !Sub 'arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*'
+              - Action:
+                  - kms:Encrypt
+                  - kms:Decrypt
+                  - kms:ReEncrypt*
+                  - kms:GenerateDataKey*
+                  - kms:DescribeKey
+                Effect: Allow
+                Resource: !Sub 'arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*'
+
+  EFSCSIDriverRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !If
+        - HasCustomEFSRoleName
+        - !Ref EFSCSIDriverRoleName
+        - !Sub 'promethium-${Environment}-${CompanyName}-efs-csi-driver-role'
+      AssumeRolePolicyDocument:
+        Fn::Sub:
+          - |
+            {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Principal": {
+                    "Federated": "arn:aws:iam::${AWS::AccountId}:oidc-provider/${OIDCProviderUrl}"
+                  },
+                  "Action": "sts:AssumeRoleWithWebIdentity",
+                  "Condition": {
+                    "StringEquals": {
+                      "${OIDCProviderUrl}:sub": "system:serviceaccount:kube-system:efs-csi-controller-sa"
+                    }
+                  }
+                }
+              ]
+            }
+          - OIDCProviderUrl: !Ref OIDCProviderUrl
+      Path: /
+      Tags: !GetAtt TagResolver.Tags
+      Policies:
+        - PolicyName: EFSCSIDriverPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - elasticfilesystem:DescribeAccessPoints
+                  - elasticfilesystem:DescribeFileSystems
+                  - elasticfilesystem:DescribeMountTargets
+                  - ec2:DescribeAvailabilityZones
+                Effect: Allow
+                Resource: '*'
+              - Action:
+                  - elasticfilesystem:CreateAccessPoint
+                Condition:
+                  StringLike:
+                    aws:RequestTag/cluster-name: !If [HasCustomClusterName, !Ref CustomClusterName, !Sub 'promethium-datafabric-${Environment}-${CompanyName}-eks-cluster']
+                    aws:RequestTag/efs.csi.aws.com/cluster: 'true'
+                Effect: Allow
+                Resource: '*'
+              - Action:
+                  - elasticfilesystem:DeleteAccessPoint
+                Condition:
+                  StringLike:
+                    aws:RequestTag/cluster-name: !If [HasCustomClusterName, !Ref CustomClusterName, !Sub 'promethium-datafabric-${Environment}-${CompanyName}-eks-cluster']
+                    aws:RequestTag/efs.csi.aws.com/cluster: 'true'
+                Effect: Allow
+                Resource: '*'
+
+  LoadBalancerControllerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !If
+        - HasCustomLBRoleName
+        - !Ref LoadBalancerControllerRoleName
+        - !Sub 'promethium-${Environment}-${CompanyName}-lb-controller-role'
+      AssumeRolePolicyDocument:
+        Fn::Sub:
+          - |
+            {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Principal": {
+                    "Federated": "arn:aws:iam::${AWS::AccountId}:oidc-provider/${OIDCProviderUrl}"
+                  },
+                  "Action": "sts:AssumeRoleWithWebIdentity",
+                  "Condition": {
+                    "StringEquals": {
+                      "${OIDCProviderUrl}:sub": "system:serviceaccount:kube-system:aws-load-balancer-controller"
+                    }
+                  }
+                }
+              ]
+            }
+          - OIDCProviderUrl: !Ref OIDCProviderUrl
+      Path: /
+      Tags: !GetAtt TagResolver.Tags
+
+  LoadBalancerControllerPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub 'promethium-${Environment}-${CompanyName}-lbcontroller-policy'
+      Roles:
+        - !Ref LoadBalancerControllerRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - iam:CreateServiceLinkedRole
+            Resource: '*'
+            Condition:
+              StringEquals:
+                iam:AWSServiceName: elasticloadbalancing.amazonaws.com
+          - Effect: Allow
+            Action:
+              - ec2:DescribeAccountAttributes
+              - ec2:DescribeAddresses
+              - ec2:DescribeAvailabilityZones
+              - ec2:DescribeInternetGateways
+              - ec2:DescribeVpcs
+              - ec2:DescribeVpcPeeringConnections
+              - ec2:DescribeSubnets
+              - ec2:DescribeSecurityGroups
+              - ec2:DescribeInstances
+              - ec2:DescribeNetworkInterfaces
+              - ec2:DescribeTags
+              - ec2:GetCoipPoolUsage
+              - ec2:DescribeCoipPools
+              - elasticloadbalancing:DescribeLoadBalancers
+              - elasticloadbalancing:DescribeLoadBalancerAttributes
+              - elasticloadbalancing:DescribeListeners
+              - elasticloadbalancing:DescribeListenerCertificates
+              - elasticloadbalancing:DescribeSSLPolicies
+              - elasticloadbalancing:DescribeRules
+              - elasticloadbalancing:DescribeTargetGroups
+              - elasticloadbalancing:DescribeTargetGroupAttributes
+              - elasticloadbalancing:DescribeTargetHealth
+              - elasticloadbalancing:DescribeTags
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - cognito-idp:DescribeUserPoolClient
+              - acm:ListCertificates
+              - acm:DescribeCertificate
+              - iam:ListServerCertificates
+              - iam:GetServerCertificate
+              - waf-regional:GetWebACL
+              - waf-regional:GetWebACLForResource
+              - waf-regional:AssociateWebACL
+              - waf-regional:DisassociateWebACL
+              - wafv2:GetWebACL
+              - wafv2:GetWebACLForResource
+              - wafv2:AssociateWebACL
+              - wafv2:DisassociateWebACL
+              - shield:GetSubscriptionState
+              - shield:DescribeProtection
+              - shield:CreateProtection
+              - shield:DeleteProtection
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - ec2:AuthorizeSecurityGroupIngress
+              - ec2:RevokeSecurityGroupIngress
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - ec2:CreateSecurityGroup
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - ec2:CreateTags
+            Resource: 'arn:aws:ec2:*:*:security-group/*'
+            Condition:
+              StringEquals:
+                ec2:CreateAction: CreateSecurityGroup
+              'Null':
+                'aws:RequestTag/elbv2.k8s.aws/cluster': 'false'
+          - Effect: Allow
+            Action:
+              - ec2:CreateTags
+              - ec2:DeleteTags
+            Resource: 'arn:aws:ec2:*:*:security-group/*'
+            Condition:
+              'Null':
+                'aws:RequestTag/elbv2.k8s.aws/cluster': 'true'
+                'aws:ResourceTag/elbv2.k8s.aws/cluster': 'false'
+          - Effect: Allow
+            Action:
+              - ec2:AuthorizeSecurityGroupIngress
+              - ec2:RevokeSecurityGroupIngress
+              - ec2:DeleteSecurityGroup
+            Resource: '*'
+            Condition:
+              'Null':
+                'aws:ResourceTag/elbv2.k8s.aws/cluster': 'false'
+          - Effect: Allow
+            Action:
+              - elasticloadbalancing:CreateLoadBalancer
+              - elasticloadbalancing:CreateTargetGroup
+            Resource: '*'
+            Condition:
+              'Null':
+                'aws:RequestTag/elbv2.k8s.aws/cluster': 'false'
+          - Effect: Allow
+            Action:
+              - elasticloadbalancing:CreateListener
+              - elasticloadbalancing:DeleteListener
+              - elasticloadbalancing:CreateRule
+              - elasticloadbalancing:DeleteRule
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - elasticloadbalancing:AddTags
+              - elasticloadbalancing:RemoveTags
+            Resource:
+              - 'arn:aws:elasticloadbalancing:*:*:targetgroup/*/*'
+              - 'arn:aws:elasticloadbalancing:*:*:loadbalancer/net/*/*'
+              - 'arn:aws:elasticloadbalancing:*:*:loadbalancer/app/*/*'
+            Condition:
+              'Null':
+                'aws:RequestTag/elbv2.k8s.aws/cluster': 'true'
+                'aws:ResourceTag/elbv2.k8s.aws/cluster': 'false'
+          - Effect: Allow
+            Action:
+              - elasticloadbalancing:AddTags
+              - elasticloadbalancing:RemoveTags
+            Resource:
+              - 'arn:aws:elasticloadbalancing:*:*:listener/net/*/*/*'
+              - 'arn:aws:elasticloadbalancing:*:*:listener/app/*/*/*'
+              - 'arn:aws:elasticloadbalancing:*:*:listener-rule/net/*/*/*'
+              - 'arn:aws:elasticloadbalancing:*:*:listener-rule/app/*/*/*'
+          - Effect: Allow
+            Action:
+              - elasticloadbalancing:ModifyLoadBalancerAttributes
+              - elasticloadbalancing:SetIpAddressType
+              - elasticloadbalancing:SetSecurityGroups
+              - elasticloadbalancing:SetSubnets
+              - elasticloadbalancing:DeleteLoadBalancer
+              - elasticloadbalancing:ModifyTargetGroup
+              - elasticloadbalancing:ModifyTargetGroupAttributes
+              - elasticloadbalancing:DeleteTargetGroup
+            Resource: '*'
+            Condition:
+              'Null':
+                'aws:ResourceTag/elbv2.k8s.aws/cluster': 'false'
+          - Effect: Allow
+            Action:
+              - elasticloadbalancing:AddTags
+            Resource:
+              - 'arn:aws:elasticloadbalancing:*:*:targetgroup/*/*'
+              - 'arn:aws:elasticloadbalancing:*:*:loadbalancer/net/*/*'
+              - 'arn:aws:elasticloadbalancing:*:*:loadbalancer/app/*/*'
+            Condition:
+              StringEquals:
+                elasticloadbalancing:CreateAction:
+                  - CreateTargetGroup
+                  - CreateLoadBalancer
+              'Null':
+                'aws:RequestTag/elbv2.k8s.aws/cluster': 'false'
+          - Effect: Allow
+            Action:
+              - elasticloadbalancing:RegisterTargets
+              - elasticloadbalancing:DeregisterTargets
+            Resource: 'arn:aws:elasticloadbalancing:*:*:targetgroup/*/*'
+          - Effect: Allow
+            Action:
+              - elasticloadbalancing:SetWebAcl
+              - elasticloadbalancing:ModifyListener
+              - elasticloadbalancing:AddListenerCertificates
+              - elasticloadbalancing:RemoveListenerCertificates
+              - elasticloadbalancing:ModifyRule
+            Resource: '*'
+
+  ClusterAutoscalerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !If
+        - HasCustomCARoleName
+        - !Ref ClusterAutoscalerRoleName
+        - !Sub 'promethium-${Environment}-${CompanyName}-cluster-autoscaler-role'
+      AssumeRolePolicyDocument:
+        Fn::Sub:
+          - |
+            {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Principal": {
+                    "Federated": "arn:aws:iam::${AWS::AccountId}:oidc-provider/${OIDCProviderUrl}"
+                  },
+                  "Action": "sts:AssumeRoleWithWebIdentity",
+                  "Condition": {
+                    "StringEquals": {
+                      "${OIDCProviderUrl}:sub": "system:serviceaccount:kube-system:cluster-autoscaler"
+                    }
+                  }
+                }
+              ]
+            }
+          - OIDCProviderUrl: !Ref OIDCProviderUrl
+      Path: /
+      Tags: !GetAtt TagResolver.Tags
+      Policies:
+        - PolicyName: ClusterAutoscalerPolicy
+          PolicyDocument:
+            Fn::Sub:
+              - |
+                {
+                  "Version": "2012-10-17",
+                  "Statement": [
+                    {
+                      "Action": [
+                        "autoscaling:SetDesiredCapacity",
+                        "autoscaling:TerminateInstanceInAutoScalingGroup"
+                      ],
+                      "Condition": {
+                        "StringEquals": {
+                          "aws:ResourceTag/k8s.io/cluster-autoscaler/${ClusterName}": "owned"
+                        }
+                      },
+                      "Effect": "Allow",
+                      "Resource": "*",
+                      "Sid": "ScalingActions"
+                    },
+                    {
+                      "Action": [
+                        "autoscaling:DescribeAutoScalingGroups",
+                        "autoscaling:DescribeAutoScalingInstances",
+                        "autoscaling:DescribeLaunchConfigurations",
+                        "autoscaling:DescribeScalingActivities",
+                        "ec2:DescribeImages",
+                        "ec2:DescribeInstanceTypes",
+                        "ec2:DescribeLaunchTemplateVersions",
+                        "ec2:GetInstanceTypesFromInstanceRequirements",
+                        "eks:DescribeNodegroup"
+                      ],
+                      "Effect": "Allow",
+                      "Resource": "*",
+                      "Sid": "ReadOnlyActions"
+                    }
+                  ]
+                }
+              - ClusterName: !If [HasCustomClusterName, !Ref CustomClusterName, !Sub 'promethium-datafabric-${Environment}-${CompanyName}-eks-cluster']
+
+  EKSClusterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !If
+        - HasCustomEKSClusterRoleName
+        - !Ref EKSClusterRoleName
+        - !Sub 'promethium-${Environment}-${CompanyName}-eks-cluster-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: eks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
+        - arn:aws:iam::aws:policy/AmazonEKSVPCResourceController
+      Path: /
+      Tags: !GetAtt TagResolver.Tags
+
+  EKSWorkerNodeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !If
+        - HasCustomEKSWorkerRoleName
+        - !Ref EKSWorkerNodeRoleName
+        - !Sub 'promethium-${Environment}-${CompanyName}-eks-worker-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Path: /
+      Tags: !GetAtt TagResolver.Tags
+      Policies:
+        - PolicyName: WorkerKMSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - kms:Encrypt
+                  - kms:Decrypt
+                  - kms:ReEncrypt*
+                  - kms:GenerateDataKey*
+                  - kms:DescribeKey
+                Effect: Allow
+                Resource: !Sub 'arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*'
+
+  PGBackupServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !If
+        - HasCustomPGBackupRoleName
+        - !Ref PGBackupServiceRoleName
+        - !Sub 'promethium-${Environment}-${CompanyName}-pg-backup-role'
+      AssumeRolePolicyDocument:
+        Fn::Sub:
+          - |
+            {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Principal": {
+                    "Federated": "arn:aws:iam::${AWS::AccountId}:oidc-provider/${OIDCProviderUrl}"
+                  },
+                  "Action": "sts:AssumeRoleWithWebIdentity",
+                  "Condition": {
+                    "StringEquals": {
+                      "${OIDCProviderUrl}:sub": [
+                        "system:serviceaccount:intelligentedge:s3-backup-sa",
+                        "system:serviceaccount:intelligentedge:sa-ecr-registry",
+                        "system:serviceaccount:cluster-management:sa-ecr-registry",
+                        "system:serviceaccount:rasa:sa-ecr-registry"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          - OIDCProviderUrl: !Ref OIDCProviderUrl
+      Path: /
+      Tags: !GetAtt TagResolver.Tags
+      Policies:
+        - PolicyName: PGBackupPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                Effect: Allow
+                Resource: !Sub 'arn:aws:s3:::promethium-postgres-backups-*/*'
+              - Action:
+                  - kms:Encrypt
+                  - kms:Decrypt
+                  - kms:ReEncrypt*
+                  - kms:GenerateDataKey*
+                  - kms:DescribeKey
+                Effect: Allow
+                Resource: !Sub 'arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*'
+              - Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:GetRepositoryPolicy
+                  - ecr:DescribeRepositories
+                  - ecr:ListImages
+                  - ecr:DescribeImages
+                  - ecr:BatchGetImage
+                  - ecr:GetLifecyclePolicy
+                  - ecr:GetLifecyclePolicyPreview
+                  - ecr:ListTagsForResource
+                  - ecr:DescribeImageScanFindings
+                Effect: Allow
+                Resource: '*'
+
+  GlueTrinoServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !If
+        - HasCustomGlueTrinoRoleName
+        - !Ref GlueTrinoServiceRoleName
+        - !Sub 'promethium-${Environment}-${CompanyName}-trino-oidc-role'
+      AssumeRolePolicyDocument:
+        Fn::Sub:
+          - |
+            {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Principal": {
+                    "Federated": "arn:aws:iam::${AWS::AccountId}:oidc-provider/${OIDCProviderUrl}"
+                  },
+                  "Action": "sts:AssumeRoleWithWebIdentity",
+                  "Condition": {
+                    "StringEquals": {
+                      "${OIDCProviderUrl}:sub": "system:serviceaccount:intelligentedge:trino-sa"
+                    }
+                  }
+                },
+                {
+                  "Sid": "AllowGlueService",
+                  "Effect": "Allow",
+                  "Principal": {
+                    "Service": "glue.amazonaws.com"
+                  },
+                  "Action": "sts:AssumeRole"
+                }
+              ]
+            }
+          - OIDCProviderUrl: !Ref OIDCProviderUrl
+      Path: /
+      Tags: !GetAtt TagResolver.Tags
+      Policies:
+        - PolicyName: GlueTrinoPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - glue:GetDatabase
+                  - glue:GetDatabases
+                  - glue:GetTable
+                  - glue:GetTables
+                  - glue:GetPartition
+                  - glue:GetPartitions
+                  - glue:BatchCreatePartition
+                  - glue:CreateTable
+                  - glue:UpdateTable
+                  - glue:DeleteTable
+                  - glue:BatchDeleteTable
+                  - glue:DeleteDatabase
+                  - glue:GetCrawler
+                  - glue:DeleteCrawler
+                  - glue:StopCrawler
+                  - glue:UpdateCrawler
+                  - glue:StartCrawler
+                  - glue:BatchGetPartition
+                Effect: Allow
+                Resource:
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:database/*'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/*'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:catalog'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:userDefinedFunction/*/*'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:crawler/*'
+              - Action:
+                  - glue:GetCrawlers
+                  - glue:ListCrawlers
+                  - glue:CreateDatabase
+                  - glue:CreateCrawler
+                Effect: Allow
+                Resource: '*'
+              - Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:GetObjectTagging
+                  - s3:DeleteObject
+                  - s3:DeleteObjectVersion
+                  - s3:GetObjectVersion
+                  - s3:GetObjectVersionTagging
+                  - s3:GetObjectACL
+                  - s3:PutObjectACL
+                  - s3:ListBucket
+                Effect: Allow
+                Resource:
+                  - 'arn:aws:s3:::*'
+                  - 'arn:aws:s3:::*/*'
+              - Action:
+                  - kms:Encrypt
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Effect: Allow
+                Resource: !Sub 'arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*'
+              # Let the Trino IRSA role pass ITSELF to Glue (paired with the
+              # AllowGlueService trust statement above) so Glue crawlers/jobs can
+              # run under this role — matches legacy trino-oidc.tf, not the
+              # unrelated AWSGlueServiceRoleDefault the CFT lineage had.
+              - Action:
+                  - iam:PassRole
+                Effect: Allow
+                Resource: !If
+                  - HasCustomGlueTrinoRoleName
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${GlueTrinoServiceRoleName}'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/promethium-${Environment}-${CompanyName}-trino-oidc-role'
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: glue.amazonaws.com
+
+Outputs:
+  DeployRoleArn:
+    Description: ARN of the Terraform deploy/install role — set terraform_assume_role_arn to this.
+    Value: !GetAtt TerraformInstallRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-DeployRoleArn'
+
+  InstanceProfileArn:
+    Description: ARN of the jumpbox instance profile
+    Value: !GetAtt TerraformInstanceProfile.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-InstanceProfileArn'
+
+  InstanceProfileName:
+    Description: Name of the jumpbox instance profile — pass as UseExistingInstanceProfile to jumpbox.yaml
+    Value: !Ref TerraformInstanceProfile
+    Export:
+      Name: !Sub '${AWS::StackName}-InstanceProfileName'
+
+  EBSCSIDriverRoleArn:
+    Description: ARN of the EBS CSI Driver role
+    Value: !GetAtt EBSCSIDriverRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-EBSCSIRoleArn
+
+  EFSCSIDriverRoleArn:
+    Description: ARN of the EFS CSI Driver role
+    Value: !GetAtt EFSCSIDriverRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-EFSCSIRoleArn
+
+  LoadBalancerControllerRoleArn:
+    Description: ARN of the Load Balancer Controller role
+    Value: !GetAtt LoadBalancerControllerRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-LBRoleArn
+
+  ClusterAutoscalerRoleArn:
+    Description: ARN of the Cluster Autoscaler role
+    Value: !GetAtt ClusterAutoscalerRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-CARoleArn
+
+  EKSClusterRoleArn:
+    Description: ARN of the EKS Cluster role
+    Value: !GetAtt EKSClusterRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-EKSClusterRoleArn
+
+  EKSWorkerNodeRoleArn:
+    Description: ARN of the EKS Worker Node role
+    Value: !GetAtt EKSWorkerNodeRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-EKSWorkerRoleArn
+
+  PGBackupServiceRoleArn:
+    Description: ARN of the PostgreSQL Backup Service role
+    Value: !GetAtt PGBackupServiceRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-PGBackupRoleArn
+
+  GlueTrinoServiceRoleArn:
+    Description: ARN of the Glue Trino Service role
+    Value: !GetAtt GlueTrinoServiceRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-GlueTrinoRoleArn
+
+  TfStateBucket:
+    Description: Terraform state S3 bucket (S3-native locking; no DynamoDB)
+    Value: !Ref TfStateBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-TfStateBucket'
