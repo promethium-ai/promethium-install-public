@@ -870,7 +870,7 @@ Resources:
   TagResolverFunction:
     Type: AWS::Lambda::Function
     Properties:
-      Runtime: python3.9
+      Runtime: python3.12
       Handler: index.lambda_handler
       Timeout: 30
       Role: !GetAtt TagResolverFunctionRole.Arn
@@ -1422,7 +1422,7 @@ Resources:
                   - s3:PutObject
                   - s3:PutObjectAcl
                 Effect: Allow
-                Resource: !Sub 'arn:aws:s3:::promethium-postgres-backups-*/*'
+                Resource: 'arn:aws:s3:::promethium-postgres-backups-*/*'
               - Action:
                   - kms:Encrypt
                   - kms:Decrypt

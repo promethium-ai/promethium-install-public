@@ -108,7 +108,7 @@ Resources:
       SubnetId: !Ref PrivateSubnet1Id
       SecurityGroupIds:
         - !Ref JumpboxSecurityGroup
-      ImageId: !Sub '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}'
+      ImageId: '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}'
       IamInstanceProfile: !If
         - HasInstanceProfile
         - !Ref UseExistingInstanceProfile
