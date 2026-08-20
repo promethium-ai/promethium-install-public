@@ -7,10 +7,12 @@ agent install) — is one script.
 
 ```
 AWS/scripts/
-├── deploy.sh        the install
-├── destroy.sh        the teardown
-├── lib-tenant.sh      shared helpers (sourced by both; not run directly)
-└── README.md          this file
+├── deploy.sh                  the install
+├── destroy.sh                  the teardown
+├── lib-tenant.sh                shared helpers (sourced by both; not run directly)
+├── check-role-drift.py            CI check: CFT operational roles vs the legacy TF module
+├── role-drift-baseline.json        golden fixture check-role-drift.py compares against
+└── README.md                      this file
 ```
 
 Both scripts are DRAFTS — read them before running anything against a real
@@ -145,6 +147,125 @@ cluster's API).
    including `_<company>-bundle/`) and delete the tfstate bucket.
 9. Print zero-trace verification: IAM roles / S3 buckets / CFT stacks /
    Cognito user pools matching the company name — all should come back empty.
+
+## Role-drift check (`check-role-drift.py`)
+
+Promethium creates the same 8 EKS/OIDC "operational" roles (EBS CSI driver,
+EFS CSI driver, LB controller, cluster autoscaler, EKS cluster role, EKS
+worker-node role, PG backup, Glue/Trino) two different ways:
+
+- **In-account installs**: Terraform (`module.iam_oidc` + `module.iam` in
+  `iac-terraform-install-redesign/aws/infrastructure`) creates the roles
+  directly.
+- **Customer-account (BYO) installs**: `AWS/CFT/foundation.yaml` creates the
+  same 8 roles up front (with a dummy OIDC provider URL), and Terraform later
+  patches just their trust policies to the real cluster once it exists (see
+  the deploy role's `iam-operational-role-trust-mgmt` inline policy and
+  `module.modify_iam_oidc_role_trust_policy` + `locals.tf`'s `role_config`).
+
+Nothing keeps these two definitions in sync automatically — a permission
+added to one and not the other is invisible until it breaks in the field.
+`check-role-drift.py` parses `foundation.yaml`, extracts each of the 8
+roles' trust subjects, direct service principals, attached managed-policy
+ARNs, and inline-policy statement action/resource sets, and diffs them
+against a hand-curated golden fixture, `role-drift-baseline.json`, derived
+from the Terraform source.
+
+### Running it
+
+```bash
+python3 AWS/scripts/check-role-drift.py            # default paths
+python3 AWS/scripts/check-role-drift.py --verbose  # print a line per passing role too
+```
+
+No dependencies beyond the Python 3 standard library — deliberately: pyyaml
+is not installed in this environment/CI, and a full YAML parser is more than
+this needs. `foundation.yaml`'s role blocks are extracted with a small
+indentation-aware line scanner rather than a general YAML library (see the
+module docstring in the script for why this is safe: the trust/policy
+documents CloudFormation embeds as `Fn::Sub` block-scalar strings are already
+valid JSON before `${...}` substitution happens, since those tokens sit
+inside quoted strings, so they're handed straight to `json.loads()`). If a
+future change to `foundation.yaml` needs real YAML semantics the hand-rolled
+scanner can't handle, reach for `pyyaml` explicitly (add it to a
+`requirements.txt` next to the script) rather than extending the scanner
+indefinitely — but note that a generic YAML load still wouldn't resolve
+CloudFormation intrinsics (`!Sub`, `!If`, `!Ref`, `!GetAtt`); this script's
+targeted extraction of the JSON-embedded and native-YAML statement shapes
+would still be needed on top.
+
+Exits non-zero if any role has unallowlisted drift. Prints a per-role
+PASS/DRIFT table; each DRIFT line names the specific field (trust subject,
+service principal, managed policy ARN, or statement) and shows expected vs.
+found.
+
+### When to run it
+
+- Locally, after editing `AWS/CFT/foundation.yaml`'s operational-role
+  resources, before opening a PR.
+- In CI, on every PR that touches `AWS/CFT/foundation.yaml` (wire it in as a
+  required check — it's fast and dependency-free).
+- After a change lands in `iac-terraform-install-redesign`'s
+  `module.iam_oidc`, `modules/iam`, or `locals.tf`'s `role_config` — this is
+  when the *baseline* goes stale, not the CFT, and the check will start
+  reporting false drift (or worse, miss real drift) until the baseline is
+  regenerated.
+
+### Regenerating the baseline
+
+`role-drift-baseline.json` is **not** parsed from Terraform automatically —
+it's a hand-curated fixture. Regenerate it by hand whenever
+`iac-terraform-install-redesign`'s `aws/infrastructure/modules/iam_oidc/*.tf`,
+`modules/iam/*.tf`, or `locals.tf`'s `role_config` change:
+
+1. Re-read the changed `.tf` file(s) for the affected role(s).
+2. Update that role's `trust_subjects` / `service_principals` /
+   `managed_policy_arns` / `statements` in the JSON to match, normalizing
+   region/account and KMS-key resources the same way the script does (see
+   `_meta.normalization_applied_by_script` in the JSON, and the ALLOWLIST
+   section in the script's docstring) — i.e. write the *already-normalized*
+   form (`arn:aws:kms:*:*:key/*`, `*` for region/account) directly into the
+   baseline rather than the raw Terraform variable reference.
+3. Update that role's `source` citation (file:line) so the next person can
+   re-verify by reading, not archaeology.
+4. Run the script and confirm it's back to all-PASS.
+
+### Telling a real gap from a stale baseline
+
+If the script reports DRIFT, it means one of two things — figure out which
+before "fixing" anything:
+
+- **A real gap in `foundation.yaml`**: someone edited the CFT's operational
+  roles without carrying the same change into the CFT from the TF side (or
+  vice versa going forward). Fix `foundation.yaml`.
+- **A stale baseline**: `iac-terraform-install-redesign` changed and nobody
+  regenerated `role-drift-baseline.json` (see above). Fix the baseline, not
+  the CFT.
+
+When in doubt, go re-read the cited TF source lines for that role and
+compare by hand — the baseline's `source` citations exist exactly so this is
+never a guessing game.
+
+**Known, deliberately out-of-scope caveat**: the baseline's
+`_meta.known_caveats` documents one confirmed inconsistency *inside* the
+Terraform reference itself (locals.tf's BYO trust-patch `role_config` for
+`PGBackupServiceRole` is missing a `rasa` namespace entry that
+`var.cronjob_namespaces`' own default includes) — that's a bug in the
+trust-*patch* path, not a CFT-vs-TF drift, so this script doesn't and can't
+catch it. Worth fixing separately in `iac-terraform-install-redesign`.
+
+### What is deliberately NOT compared
+
+- **`RoleName`** — the CFT and TF name these roles completely differently
+  (`promethium-${Environment}-${CompanyName}-<role>` vs. TF's own
+  convention); roles are matched by logical identity (which CloudFormation
+  resource / Terraform resource), never by name string.
+- **IAM `Condition` blocks** — e.g. the EFS policy's
+  `aws:RequestTag/cluster-name` value, or the autoscaler policy's
+  `k8s.io/cluster-autoscaler/<name>` tag condition. These are
+  cluster-name/tag-scoped values that legitimately differ per install; only
+  trust subjects/principals and each statement's action + resource sets are
+  compared.
 
 ## Assumptions / TODO
 
