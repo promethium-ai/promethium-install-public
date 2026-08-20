@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-check-role-drift.py — fail CI if the BYO Foundation CFT's 8 operational IAM
-roles diverge from what the legacy in-account Terraform module produces.
+check-role-drift.py — fail CI if the BYO operational-roles CFT's 8 operational
+IAM roles diverge from what the legacy in-account Terraform module produces.
 
 WHY
 ---
@@ -11,15 +11,20 @@ ways:
   1. In-account installs: Terraform (module.iam_oidc + module.iam in
      iac-terraform-install-redesign/aws/infrastructure) creates the roles
      directly.
-  2. Customer-account (BYO) installs: AWS/CFT/foundation.yaml creates the
-     roles up front (with a dummy OIDC provider), and Terraform later patches
-     just their trust policies to the real cluster
+  2. Customer-account (BYO) installs: AWS/CFT/operational_roles.yaml creates
+     the roles up front (with a dummy OIDC provider), and Terraform later
+     patches just their trust policies to the real cluster
      (module.modify_iam_oidc_role_trust_policy + locals.tf's role_config).
+     (The sibling AWS/CFT/foundation.yaml stack creates only the Terraform
+     deploy/install role + tfstate bucket — the two were split into separate
+     stacks so each rendered template stays under CloudFormation's
+     51,200-byte inline/--template-file size limit; this script only cares
+     about the operational-roles half.)
 
 Nothing stops these two definitions from silently drifting apart — a
 permission added to one and not the other is invisible until something
-breaks in the field. This script parses foundation.yaml, extracts each of
-the 8 roles' trust subjects / service principals / attached managed
+breaks in the field. This script parses operational_roles.yaml, extracts
+each of the 8 roles' trust subjects / service principals / attached managed
 policies / inline policy statements, and diffs them against a hand-curated
 golden fixture (role-drift-baseline.json) derived from the Terraform source.
 
@@ -29,8 +34,8 @@ baseline.
 DESIGN
 ------
 No YAML library is used (pyyaml is not installed in CI and this avoids
-adding a pip dependency — see README). foundation.yaml's role blocks are
-extracted with a small indentation-aware line scanner (`get_block`,
+adding a pip dependency — see README). operational_roles.yaml's role blocks
+are extracted with a small indentation-aware line scanner (`get_block`,
 `split_dash_items`, ...) that understands just enough of the YAML subset
 CloudFormation templates actually use: block mappings, block sequences, and
 literal block scalars (`|`). The trust/policy documents that are embedded as
@@ -78,7 +83,12 @@ from collections import Counter
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-DEFAULT_FOUNDATION = SCRIPT_DIR.parent / "CFT" / "foundation.yaml"
+# The 8 operational roles live in operational_roles.yaml (split out of
+# foundation.yaml so each rendered CFT stays under CloudFormation's
+# 51,200-byte inline/--template-file size limit — foundation.yaml now holds
+# only the Terraform deploy/install role + tfstate bucket, neither of which
+# this script compares).
+DEFAULT_OPERATIONAL_ROLES = SCRIPT_DIR.parent / "CFT" / "operational_roles.yaml"
 DEFAULT_BASELINE = SCRIPT_DIR / "role-drift-baseline.json"
 
 # The 8 operational roles, in the order the task/README describes them.
@@ -187,7 +197,7 @@ def split_dash_items(lines: list[str]) -> list[list[str]]:
 
 def get_value_list(lines: list[str], key: str) -> list[str]:
     """Resolve a 'Key: ...' entry to a list of scalar strings, handling all
-    three shapes foundation.yaml actually uses for Action/Resource/
+    three shapes operational_roles.yaml actually uses for Action/Resource/
     ManagedPolicyArns:
         Key: scalar                     -> [scalar]
         Key:\n  - a\n  - b               -> [a, b]
@@ -293,8 +303,8 @@ def parse_statement_item(item_lines: list[str]) -> dict:
 
 def parse_policy_document(lines: list[str]) -> list[dict]:
     """`lines` is a PolicyDocument's value-block. Handles both shapes used in
-    foundation.yaml: native YAML `Statement:` list, and (ClusterAutoscalerPolicy
-    only) an `Fn::Sub:`-embedded JSON document."""
+    operational_roles.yaml: native YAML `Statement:` list, and
+    (ClusterAutoscalerPolicy only) an `Fn::Sub:`-embedded JSON document."""
     if find(lines, lambda l: l.strip() == "Fn::Sub:") is not None:
         doc = extract_fn_sub_literal_json(lines)
         out = []
@@ -426,9 +436,9 @@ def compare_sets(diff: RoleDiff, field: str, expected: list[str], found: list[st
     missing = sorted(exp - fnd)
     extra = sorted(fnd - exp)
     if missing:
-        diff.add(f"{field}: missing (in baseline, not in foundation.yaml): {missing}")
+        diff.add(f"{field}: missing (in baseline, not in operational_roles.yaml): {missing}")
     if extra:
-        diff.add(f"{field}: unexpected (in foundation.yaml, not in baseline): {extra}")
+        diff.add(f"{field}: unexpected (in operational_roles.yaml, not in baseline): {extra}")
 
 
 def compare_statements(diff: RoleDiff, expected: list[dict], found: list[dict]):
@@ -463,14 +473,14 @@ def compare_role(role: str, expected: dict, found: dict) -> RoleDiff:
 # ───────────────────────────── main ──────────────────────────────────────────
 
 def main(argv: list[str]) -> int:
-    foundation_path = DEFAULT_FOUNDATION
+    operational_roles_path = DEFAULT_OPERATIONAL_ROLES
     baseline_path = DEFAULT_BASELINE
     verbose = False
     args = list(argv)
     while args:
         a = args.pop(0)
-        if a == "--foundation":
-            foundation_path = Path(args.pop(0))
+        if a == "--operational-roles":
+            operational_roles_path = Path(args.pop(0))
         elif a == "--baseline":
             baseline_path = Path(args.pop(0))
         elif a in ("-v", "--verbose"):
@@ -483,7 +493,7 @@ def main(argv: list[str]) -> int:
             return 2
 
     baseline = json.loads(baseline_path.read_text())
-    lines = read_lines(foundation_path)
+    lines = read_lines(operational_roles_path)
 
     results: list[RoleDiff] = []
     exit_code = 0
@@ -500,7 +510,7 @@ def main(argv: list[str]) -> int:
             found = extract_role(lines, role)
         except Exception as exc:  # noqa: BLE001 - surfaced as a per-role failure
             diff = RoleDiff(role)
-            diff.add(f"PARSE ERROR while extracting from foundation.yaml: {exc!r}")
+            diff.add(f"PARSE ERROR while extracting from operational_roles.yaml: {exc!r}")
             results.append(diff)
             exit_code = 1
             continue
@@ -532,7 +542,7 @@ def main(argv: list[str]) -> int:
         print(f"DRIFT DETECTED in {len(drifted)}/{len(results)} role(s): "
               f"{', '.join(drifted)}")
         print("See AWS/scripts/README.md ('Role-drift check') for how to "
-              "tell a real gap in foundation.yaml from a stale baseline.")
+              "tell a real gap in operational_roles.yaml from a stale baseline.")
     return exit_code
 
 

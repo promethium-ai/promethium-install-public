@@ -1,21 +1,38 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'EKS Addon Roles and Service Account Roles for Promethium EKS Cluster'
+Description: >
+  Promethium Intelligent Edge — Operational roles stack for a customer-account
+  install. Creates the 8 EKS/OIDC "operational" roles (EBS CSI driver, EFS CSI
+  driver, LB controller, cluster autoscaler, EKS cluster role, EKS worker-node
+  role, PG backup, Glue/Trino) plus the Lambda-backed TagResolver custom
+  resource used to tag them.
+
+  Split out of foundation.yaml (which now holds only the Terraform
+  deploy/install role + tfstate bucket) so each rendered template stays under
+  CloudFormation's 51,200-byte inline (--template-file, no S3 bucket) size
+  limit — see AWS/scripts/prereqs.sh, which deploys foundation.yaml then this
+  stack (then, optionally, jumpbox.yaml) in order. Deploy this AFTER
+  foundation.yaml, with OIDCProviderUrl left at its dummy default — Terraform
+  creates the real cluster and OIDC provider afterwards, then patches these
+  roles' trust policies to the real URL via iam:UpdateAssumeRolePolicy (see
+  foundation.yaml's TerraformInstallRole iam-operational-role-trust-mgmt
+  inline policy).
 
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label:
-          default: "Tagging Options"
-        Parameters:
-          - TagMode
-          - CustomTags
-      - Label:
-          default: "EKS Role Configuration"
+          default: "Core (Required)"
         Parameters:
           - CompanyName
           - Environment
+      - Label:
+          default: "EKS / OIDC Configuration"
+        Parameters:
           - CustomClusterName
           - OIDCProviderUrl
+      - Label:
+          default: "Operational Role Name Overrides (Optional)"
+        Parameters:
           - EBSCSIDriverRoleName
           - EFSCSIDriverRoleName
           - LoadBalancerControllerRoleName
@@ -24,7 +41,20 @@ Metadata:
           - EKSWorkerNodeRoleName
           - PGBackupServiceRoleName
           - GlueTrinoServiceRoleName
+      - Label:
+          default: "Tagging Options"
+        Parameters:
+          - TagMode
+          - CustomTags
     ParameterLabels:
+      CompanyName:
+        default: "Company Name"
+      Environment:
+        default: "Environment (dev/qa/preview/prod)"
+      CustomClusterName:
+        default: "Custom EKS Cluster Name"
+      OIDCProviderUrl:
+        default: "OIDC Provider URL"
       TagMode:
         default: "Tag Mode"
       CustomTags:
@@ -33,63 +63,72 @@ Metadata:
 Parameters:
   CompanyName:
     Type: String
-    Description: Short company identifier (e.g. acme). Appended to all default role names to avoid conflicts when multiple Promethium deployments exist in the same account.
+    Description: Short company identifier (e.g. acme), lowercase, no spaces (recommended max 15 chars). Appended to all default role names to avoid collisions when multiple Promethium tenants/environments share this AWS account. REQUIRED — must match the CompanyName given to foundation.yaml.
 
   Environment:
     Type: String
-    Default: prod
     AllowedValues:
       - dev
       - qa
       - preview
       - prod
-    Description: Deployment environment. Used in the Glue/Trino default role name so it matches the workload's derived IRSA role name promethium-<Environment>-<CompanyName>-trino-oidc-role (the trino-sa ServiceAccount annotation set by the umbrella). Must equal the tenant env.
+    Description: >-
+      Deployment environment for this tenant. REQUIRED — no default. Used in
+      the default role names so they match the Glue/Trino IRSA role name
+      promethium-<Environment>-<CompanyName>-trino-oidc-role that the
+      umbrella's trino-sa ServiceAccount annotation expects. Must equal the
+      tenant's actual env and match the Environment given to foundation.yaml.
 
   CustomClusterName:
     Type: String
     Default: ''
-    Description: "Optional EKS cluster name override. Leave blank to use the default format promethium-datafabric-prod-<CompanyName>-eks-cluster."
-  
+    Description: "Optional EKS cluster name override. Leave blank to use the default format promethium-datafabric-<Environment>-<CompanyName>-eks-cluster."
+
   OIDCProviderUrl:
     Type: String
     Default: oidc.eks.us-east-1.amazonaws.com/id/DUMMY1234567890
-    Description: OIDC Provider URL for EKS cluster (replace with actual OIDC URL)
-  
+    Description: >-
+      OIDC Provider URL for the EKS cluster. Leave at the dummy default for
+      this initial deploy — Terraform creates the real cluster and OIDC
+      provider afterwards, then patches these roles' trust policies to the
+      real URL via iam:UpdateAssumeRolePolicy (granted to the Terraform
+      deploy role in foundation.yaml).
+
   EBSCSIDriverRoleName:
     Type: String
     Default: ''
     Description: Custom name for EBS CSI Driver role (optional)
-  
+
   EFSCSIDriverRoleName:
     Type: String
     Default: ''
     Description: Custom name for EFS CSI Driver role (optional)
-  
+
   LoadBalancerControllerRoleName:
     Type: String
     Default: ''
     Description: Custom name for Load Balancer Controller role (optional)
-  
+
   ClusterAutoscalerRoleName:
     Type: String
     Default: ''
     Description: Custom name for Cluster Autoscaler role (optional)
-  
+
   EKSClusterRoleName:
     Type: String
     Default: ''
     Description: Custom name for EKS Cluster role (optional)
-  
+
   EKSWorkerNodeRoleName:
     Type: String
     Default: ''
     Description: Custom name for EKS Worker Node role (optional)
-  
+
   PGBackupServiceRoleName:
     Type: String
     Default: ''
     Description: Custom name for PostgreSQL Backup Service role (optional)
-  
+
   GlueTrinoServiceRoleName:
     Type: String
     Default: ''
@@ -111,7 +150,6 @@ Parameters:
 Mappings:
   DefaultTags:
     Values:
-      Environment: prod
       Product: Promethium
       Owner: support@promethium.ai
       createdBy: CloudFormation
@@ -130,6 +168,10 @@ Conditions:
 
 Resources:
 
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Tag resolver (Lambda-backed custom resource)
+  # ═══════════════════════════════════════════════════════════════════════════
+
   TagResolverFunctionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -147,7 +189,7 @@ Resources:
   TagResolverFunction:
     Type: AWS::Lambda::Function
     Properties:
-      Runtime: python3.9
+      Runtime: python3.12
       Handler: index.lambda_handler
       Timeout: 30
       Role: !GetAtt TagResolverFunctionRole.Arn
@@ -188,20 +230,33 @@ Resources:
       ServiceToken: !GetAtt TagResolverFunction.Arn
       TagMode: !Ref TagMode
       DefaultTags:
-        Environment: !FindInMap [DefaultTags, Values, Environment]
+        # Environment/Company now come from the real parameters (fixed during
+        # merge — operational_roles.yaml previously pulled a static "prod"
+        # literal from the Mappings block regardless of the Environment
+        # parameter's actual value; see foundation-review.md).
+        Environment: !Ref Environment
+        Company: !Ref CompanyName
         Product: !FindInMap [DefaultTags, Values, Product]
         Owner: !FindInMap [DefaultTags, Values, Owner]
         createdBy: !FindInMap [DefaultTags, Values, createdBy]
         Project: !FindInMap [DefaultTags, Values, Project]
       CustomTags: !Ref CustomTags
 
+  # ═══════════════════════════════════════════════════════════════════════════
+  # 8 operational roles — env-aware default names:
+  # promethium-${Environment}-${CompanyName}-<role>. Trust `sub` conditions and
+  # policies carry the AllowGlueService/self-PassRole (GlueTrinoServiceRole)
+  # and rasa-namespace (PGBackupServiceRole) fixes — see
+  # AWS/scripts/role-drift-baseline.json for the source-of-truth citations.
+  # ═══════════════════════════════════════════════════════════════════════════
+
   EBSCSIDriverRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !If 
+      RoleName: !If
         - HasCustomEBSRoleName
         - !Ref EBSCSIDriverRoleName
-        - !Sub 'promethium-prod-ebs-csi-driver-role-${CompanyName}'
+        - !Sub 'promethium-${Environment}-${CompanyName}-ebs-csi-driver-role'
       AssumeRolePolicyDocument:
         Fn::Sub:
           - |
@@ -253,10 +308,10 @@ Resources:
   EFSCSIDriverRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !If 
+      RoleName: !If
         - HasCustomEFSRoleName
         - !Ref EFSCSIDriverRoleName
-        - !Sub 'promethium-prod-efs-csi-driver-role-${CompanyName}'
+        - !Sub 'promethium-${Environment}-${CompanyName}-efs-csi-driver-role'
       AssumeRolePolicyDocument:
         Fn::Sub:
           - |
@@ -296,7 +351,7 @@ Resources:
                   - elasticfilesystem:CreateAccessPoint
                 Condition:
                   StringLike:
-                    aws:RequestTag/cluster-name: !If [HasCustomClusterName, !Ref CustomClusterName, !Sub 'promethium-datafabric-prod-${CompanyName}-eks-cluster']
+                    aws:RequestTag/cluster-name: !If [HasCustomClusterName, !Ref CustomClusterName, !Sub 'promethium-datafabric-${Environment}-${CompanyName}-eks-cluster']
                     aws:RequestTag/efs.csi.aws.com/cluster: 'true'
                 Effect: Allow
                 Resource: '*'
@@ -304,7 +359,7 @@ Resources:
                   - elasticfilesystem:DeleteAccessPoint
                 Condition:
                   StringLike:
-                    aws:RequestTag/cluster-name: !If [HasCustomClusterName, !Ref CustomClusterName, !Sub 'promethium-datafabric-prod-${CompanyName}-eks-cluster']
+                    aws:RequestTag/cluster-name: !If [HasCustomClusterName, !Ref CustomClusterName, !Sub 'promethium-datafabric-${Environment}-${CompanyName}-eks-cluster']
                     aws:RequestTag/efs.csi.aws.com/cluster: 'true'
                 Effect: Allow
                 Resource: '*'
@@ -312,10 +367,10 @@ Resources:
   LoadBalancerControllerRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !If 
+      RoleName: !If
         - HasCustomLBRoleName
         - !Ref LoadBalancerControllerRoleName
-        - !Sub 'promethium-prod-lb-controller-role-${CompanyName}'
+        - !Sub 'promethium-${Environment}-${CompanyName}-lb-controller-role'
       AssumeRolePolicyDocument:
         Fn::Sub:
           - |
@@ -343,7 +398,7 @@ Resources:
   LoadBalancerControllerPolicy:
     Type: AWS::IAM::Policy
     Properties:
-      PolicyName: !Sub 'promethium-prod-lbcontroller-policy-${CompanyName}'
+      PolicyName: !Sub 'promethium-${Environment}-${CompanyName}-lbcontroller-policy'
       Roles:
         - !Ref LoadBalancerControllerRole
       PolicyDocument:
@@ -519,10 +574,10 @@ Resources:
   ClusterAutoscalerRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !If 
+      RoleName: !If
         - HasCustomCARoleName
         - !Ref ClusterAutoscalerRoleName
-        - !Sub 'promethium-prod-cluster-autoscaler-role-${CompanyName}'
+        - !Sub 'promethium-${Environment}-${CompanyName}-cluster-autoscaler-role'
       AssumeRolePolicyDocument:
         Fn::Sub:
           - |
@@ -586,15 +641,15 @@ Resources:
                     }
                   ]
                 }
-              - ClusterName: !If [HasCustomClusterName, !Ref CustomClusterName, !Sub 'promethium-datafabric-prod-${CompanyName}-eks-cluster']
+              - ClusterName: !If [HasCustomClusterName, !Ref CustomClusterName, !Sub 'promethium-datafabric-${Environment}-${CompanyName}-eks-cluster']
 
   EKSClusterRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !If 
+      RoleName: !If
         - HasCustomEKSClusterRoleName
         - !Ref EKSClusterRoleName
-        - !Sub 'promethium-prod-eks-cluster-role-${CompanyName}'
+        - !Sub 'promethium-${Environment}-${CompanyName}-eks-cluster-role'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -611,10 +666,10 @@ Resources:
   EKSWorkerNodeRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !If 
+      RoleName: !If
         - HasCustomEKSWorkerRoleName
         - !Ref EKSWorkerNodeRoleName
-        - !Sub 'promethium-prod-eks-worker-role-${CompanyName}'
+        - !Sub 'promethium-${Environment}-${CompanyName}-eks-worker-role'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -646,10 +701,10 @@ Resources:
   PGBackupServiceRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !If 
+      RoleName: !If
         - HasCustomPGBackupRoleName
         - !Ref PGBackupServiceRoleName
-        - !Sub 'promethium-prod-pg-backup-role-${CompanyName}'
+        - !Sub 'promethium-${Environment}-${CompanyName}-pg-backup-role'
       AssumeRolePolicyDocument:
         Fn::Sub:
           - |
@@ -667,7 +722,8 @@ Resources:
                       "${OIDCProviderUrl}:sub": [
                         "system:serviceaccount:intelligentedge:s3-backup-sa",
                         "system:serviceaccount:intelligentedge:sa-ecr-registry",
-                        "system:serviceaccount:cluster-management:sa-ecr-registry"
+                        "system:serviceaccount:cluster-management:sa-ecr-registry",
+                        "system:serviceaccount:rasa:sa-ecr-registry"
                       ]
                     }
                   }
@@ -686,7 +742,7 @@ Resources:
                   - s3:PutObject
                   - s3:PutObjectAcl
                 Effect: Allow
-                Resource: !Sub 'arn:aws:s3:::promethium-postgres-backups-*/*'
+                Resource: 'arn:aws:s3:::promethium-postgres-backups-*/*'
               - Action:
                   - kms:Encrypt
                   - kms:Decrypt
@@ -735,6 +791,14 @@ Resources:
                       "${OIDCProviderUrl}:sub": "system:serviceaccount:intelligentedge:trino-sa"
                     }
                   }
+                },
+                {
+                  "Sid": "AllowGlueService",
+                  "Effect": "Allow",
+                  "Principal": {
+                    "Service": "glue.amazonaws.com"
+                  },
+                  "Action": "sts:AssumeRole"
                 }
               ]
             }
@@ -801,10 +865,20 @@ Resources:
                   - kms:DescribeKey
                 Effect: Allow
                 Resource: !Sub 'arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*'
+              # Let the Trino IRSA role pass ITSELF to Glue (paired with the
+              # AllowGlueService trust statement above) so Glue crawlers/jobs can
+              # run under this role — matches legacy trino-oidc.tf, not the
+              # unrelated AWSGlueServiceRoleDefault the CFT lineage had.
               - Action:
                   - iam:PassRole
                 Effect: Allow
-                Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/AWSGlueServiceRoleDefault'
+                Resource: !If
+                  - HasCustomGlueTrinoRoleName
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${GlueTrinoServiceRoleName}'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/promethium-${Environment}-${CompanyName}-trino-oidc-role'
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: glue.amazonaws.com
 
 Outputs:
   EBSCSIDriverRoleArn:

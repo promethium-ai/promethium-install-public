@@ -10,7 +10,8 @@
 # EKS cluster deletion nukes the rest of the in-cluster content), remove the
 # hub Application + cluster registration, remove the gitops tenant file,
 # best-effort cross-account 734 cleanup, then (ONLY if we created the VPC)
-# tear down the VPC chain, then the Foundation stack + tfstate bucket.
+# tear down the VPC chain, then the Foundation + operational-roles stacks and
+# the tfstate bucket.
 #
 # *** DO NOT run this from the promethium-jumpbox-<company> instance being
 # *** torn down. Step 7 below deletes that jumpbox's own CloudFormation stack —
@@ -108,6 +109,7 @@ AWS_REGION="${AWS_REGION:-us-east-1}"
 
 NETWORK_STACK="promethium-network-${COMPANY_NAME}"
 FOUNDATION_STACK="promethium-foundation-${COMPANY_NAME}"
+OPROLES_STACK="promethium-operational-roles-${COMPANY_NAME}"
 REPO_DIR="${WORKDIR}/promethium-internal-ie-aws-${COMPANY_NAME}"
 CLUSTER_NAME="promethium-datafabric-${ENVIRONMENT}-${COMPANY_NAME}-eks-cluster"
 BYO_VPC=false; [ -n "$VPC_ID_OVERRIDE" ] && BYO_VPC=true
@@ -128,8 +130,9 @@ cat <<PLAN
 
   This is IRREVERSIBLE: EKS cluster, all in-cluster workloads, the hub Argo
   Application + agent registration, the gitops tenant file, the Foundation
-  stack's IAM roles, and the tfstate bucket (incl. the agent cert bundle) are
-  all deleted. If ${NETWORK_STACK} exists, the VPC it created is deleted too.
+  and operational-roles (${OPROLES_STACK}) stacks' IAM roles, and the tfstate
+  bucket (incl. the agent cert bundle) are all deleted. If ${NETWORK_STACK}
+  exists, the VPC it created is deleted too.
 
 PLAN
 
@@ -197,14 +200,20 @@ stack_exists "$FOUNDATION_STACK" "$AWS_REGION" || { echo "ERROR: stack ${FOUNDAT
 DEPLOY_ROLE_ARN=$(stack_output "$FOUNDATION_STACK" DeployRoleArn "$AWS_REGION")
 INSTANCE_PROFILE_NAME=$(stack_output "$FOUNDATION_STACK" InstanceProfileName "$AWS_REGION")
 TF_STATE_BUCKET=$(stack_output "$FOUNDATION_STACK" TfStateBucket "$AWS_REGION")
-EBS_ROLE_ARN=$(stack_output "$FOUNDATION_STACK" EBSCSIDriverRoleArn "$AWS_REGION")
-EFS_ROLE_ARN=$(stack_output "$FOUNDATION_STACK" EFSCSIDriverRoleArn "$AWS_REGION")
-LB_ROLE_ARN=$(stack_output "$FOUNDATION_STACK" LoadBalancerControllerRoleArn "$AWS_REGION")
-CA_ROLE_ARN=$(stack_output "$FOUNDATION_STACK" ClusterAutoscalerRoleArn "$AWS_REGION")
-EKS_CLUSTER_ROLE_ARN=$(stack_output "$FOUNDATION_STACK" EKSClusterRoleArn "$AWS_REGION")
-EKS_WORKER_ROLE_ARN=$(stack_output "$FOUNDATION_STACK" EKSWorkerNodeRoleArn "$AWS_REGION")
-PG_BACKUP_ROLE_ARN=$(stack_output "$FOUNDATION_STACK" PGBackupServiceRoleArn "$AWS_REGION")
-TRINO_ROLE_ARN=$(stack_output "$FOUNDATION_STACK" GlueTrinoServiceRoleArn "$AWS_REGION")
+
+# The 8 operational role ARNs live in the SEPARATE promethium-operational-roles-
+# <company> stack (foundation.yaml was split into foundation.yaml + this
+# stack so each rendered CFT stays under CloudFormation's 51,200-byte inline
+# size limit — see AWS/scripts/prereqs.sh).
+stack_exists "$OPROLES_STACK" "$AWS_REGION" || { echo "ERROR: stack ${OPROLES_STACK} not found — cannot re-render tfvars for destroy" >&2; exit 1; }
+EBS_ROLE_ARN=$(stack_output "$OPROLES_STACK" EBSCSIDriverRoleArn "$AWS_REGION")
+EFS_ROLE_ARN=$(stack_output "$OPROLES_STACK" EFSCSIDriverRoleArn "$AWS_REGION")
+LB_ROLE_ARN=$(stack_output "$OPROLES_STACK" LoadBalancerControllerRoleArn "$AWS_REGION")
+CA_ROLE_ARN=$(stack_output "$OPROLES_STACK" ClusterAutoscalerRoleArn "$AWS_REGION")
+EKS_CLUSTER_ROLE_ARN=$(stack_output "$OPROLES_STACK" EKSClusterRoleArn "$AWS_REGION")
+EKS_WORKER_ROLE_ARN=$(stack_output "$OPROLES_STACK" EKSWorkerNodeRoleArn "$AWS_REGION")
+PG_BACKUP_ROLE_ARN=$(stack_output "$OPROLES_STACK" PGBackupServiceRoleArn "$AWS_REGION")
+TRINO_ROLE_ARN=$(stack_output "$OPROLES_STACK" GlueTrinoServiceRoleArn "$AWS_REGION")
 
 if [ -n "$JUMPBOX_SG_ID_OVERRIDE" ]; then
   JUMPBOX_SG_ID="$JUMPBOX_SG_ID_OVERRIDE"
@@ -370,11 +379,20 @@ else
   echo "  ${NETWORK_STACK} not found — BYO VPC, leaving it untouched (never delete a customer's own VPC)"
 fi
 
-# ---- Step 8: Foundation stack + tfstate bucket --------------------------------
-echo; echo "== Step 8: Foundation stack + tfstate bucket =="
+# ---- Step 8: Foundation + operational-roles stacks + tfstate bucket ----------
+echo; echo "== Step 8: Foundation + operational-roles stacks + tfstate bucket =="
 echo "  deleting stack ${FOUNDATION_STACK} (TfStateBucket has DeletionPolicy: Retain, so it survives this)"
 aws cloudformation delete-stack --stack-name "$FOUNDATION_STACK" --region "$AWS_REGION"
 aws cloudformation wait stack-delete-complete --stack-name "$FOUNDATION_STACK" --region "$AWS_REGION"
+
+# operational_roles.yaml's stack is dependency-free IAM (8 roles + a Lambda-
+# backed custom resource, no VPC/ENI/bucket entanglements) so it deletes
+# cleanly right alongside Foundation, with none of the GuardDuty-endpoint/ENI
+# choreography Step 7's network teardown needs — no reason to delay it until
+# after the tfstate bucket steps below.
+echo "  deleting stack ${OPROLES_STACK}"
+aws cloudformation delete-stack --stack-name "$OPROLES_STACK" --region "$AWS_REGION"
+aws cloudformation wait stack-delete-complete --stack-name "$OPROLES_STACK" --region "$AWS_REGION"
 
 STATE_BUCKET="promethium-tfstate-${CUSTOMER_ACCOUNT_ID}"
 empty_versioned_bucket "$STATE_BUCKET" "$AWS_REGION"

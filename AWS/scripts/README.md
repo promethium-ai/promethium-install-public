@@ -7,40 +7,47 @@ agent install) — is one script.
 
 ```
 AWS/scripts/
+├── prereqs.sh                  the local CloudFormation prerequisites (network+foundation+operational_roles[+jumpbox])
 ├── deploy.sh                  the install
 ├── destroy.sh                  the teardown
-├── lib-tenant.sh                shared helpers (sourced by both; not run directly)
+├── lib-tenant.sh                shared helpers (sourced by all three; not run directly)
 ├── check-role-drift.py            CI check: CFT operational roles vs the legacy TF module
 ├── role-drift-baseline.json        golden fixture check-role-drift.py compares against
 └── README.md                      this file
 ```
 
-Both scripts are DRAFTS — read them before running anything against a real
-account. Neither has been executed; see the assumptions list below for
+All three scripts are DRAFTS — read them before running anything against a
+real account. None has been executed; see the assumptions list below for
 everything that needs a second pair of eyes.
+
+### Why two CFTs instead of one (`foundation.yaml` + `operational_roles.yaml`)
+
+CloudFormation's inline-template deploy path (`--template-file`, no
+`--s3-bucket`) caps a template at 51,200 bytes. A single combined template
+covering the Terraform deploy/install role, the tfstate bucket, AND the 8
+EKS/OIDC operational roles ran to ~64.9 KB — over the limit, and only
+deployable via an S3-staged `--template-url`. Splitting it into two keeps
+each one local-deployable with no S3 bucket, no bucket policy, and no upload
+credentials required just to bootstrap a brand-new customer account:
+
+- **`AWS/CFT/foundation.yaml`** — the Terraform deploy/install role (+
+  instance profile) and the tfstate S3 bucket.
+- **`AWS/CFT/operational_roles.yaml`** — the 8 EKS/OIDC operational roles
+  (EBS/EFS CSI driver, LB controller, cluster autoscaler, EKS cluster/worker,
+  PG backup, Glue/Trino) + the Lambda-backed TagResolver custom resource.
+
+`AWS/scripts/prereqs.sh` deploys both (plus `network.yaml` and, optionally,
+`jumpbox.yaml`) in the right order with a single command — see below.
 
 ## The flow
 
 ### Greenfield (Promethium creates the VPC too)
 
 ```bash
-# 1. CloudFormation prerequisites (once per company)
-aws cloudformation deploy --region us-east-1 \
-  --template-file AWS/CFT/network.yaml \
-  --stack-name promethium-network-acme \
-  --parameter-overrides Environment=dev CompanyName=acme \
-  && aws cloudformation deploy --region us-east-1 \
-  --template-file AWS/CFT/foundation.yaml \
-  --stack-name promethium-foundation-acme \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --parameter-overrides Environment=dev CompanyName=acme \
-  && aws cloudformation deploy --region us-east-1 \
-  --template-file AWS/CFT/jumpbox.yaml \
-  --stack-name promethium-jumpbox-acme \
-  --parameter-overrides Environment=dev \
-    VpcId=$(aws cloudformation describe-stacks --stack-name promethium-network-acme --query "Stacks[0].Outputs[?OutputKey=='VpcId'].OutputValue" --output text) \
-    PrivateSubnet1Id=$(aws cloudformation describe-stacks --stack-name promethium-network-acme --query "Stacks[0].Outputs[?OutputKey=='Subnet1Id'].OutputValue" --output text) \
-    UseExistingInstanceProfile=$(aws cloudformation describe-stacks --stack-name promethium-foundation-acme --query "Stacks[0].Outputs[?OutputKey=='InstanceProfileName'].OutputValue" --output text)
+# 1. CloudFormation prerequisites (once per company) — network.yaml,
+#    foundation.yaml, operational_roles.yaml, jumpbox.yaml, all deployed
+#    locally (--template-file, no S3 bucket) and idempotent.
+./prereqs.sh acme dev
 
 # Connect to the jumpbox (SSM Session Manager), then from there:
 
@@ -51,25 +58,18 @@ aws cloudformation deploy --region us-east-1 \
 ### BYO VPC (customer provides the VPC)
 
 ```bash
-# 1. CloudFormation prerequisites (no network.yaml — the VPC is the customer's)
-aws cloudformation deploy --region us-east-1 \
-  --template-file AWS/CFT/foundation.yaml \
-  --stack-name promethium-foundation-acme \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --parameter-overrides Environment=dev CompanyName=acme \
-  && aws cloudformation deploy --region us-east-1 \
-  --template-file AWS/CFT/jumpbox.yaml \
-  --stack-name promethium-jumpbox-acme \
-  --parameter-overrides Environment=dev VpcId=vpc-xxxx PrivateSubnet1Id=subnet-xxxx \
-    UseExistingInstanceProfile=$(aws cloudformation describe-stacks --stack-name promethium-foundation-acme --query "Stacks[0].Outputs[?OutputKey=='InstanceProfileName'].OutputValue" --output text)
+# 1. CloudFormation prerequisites (--vpc-id skips network.yaml — the VPC is
+#    the customer's)
+./prereqs.sh acme dev --vpc-id vpc-xxxx --subnet-ids subnet-a,subnet-b,subnet-c
 
 # 2. everything else
 ./deploy.sh acme dev --vpc-id vpc-xxxx --subnet-ids subnet-a,subnet-b,subnet-c
 ```
 
-`deploy.sh` tells the two cases apart itself: pass `--vpc-id`/`--subnet-ids` for
-BYO, or leave them off and it reads `promethium-network-<company>`'s outputs.
-`jumpbox.yaml` is optional in both cases — it's only *where you run
+Both `prereqs.sh` and `deploy.sh` tell the two cases apart the same way: pass
+`--vpc-id`/`--subnet-ids` for BYO, or leave them off and they read
+`promethium-network-<company>`'s outputs. `jumpbox.yaml` is optional in both
+cases (`prereqs.sh --no-jumpbox` skips it) — it's only *where you run
 `deploy.sh` from*, not a dependency `deploy.sh` checks for. What it does
 require: a host with the customer account's credentials and (once the cluster
 exists) private network reach to its API.
@@ -96,7 +96,9 @@ cluster's API).
 
 1. Resolve the VPC (BYO flags, or the `promethium-network-<company>` stack).
 2. Resolve the `promethium-foundation-<company>` stack's outputs (deploy role,
-   instance profile, the 8 operational role ARNs, the tfstate bucket).
+   instance profile, the tfstate bucket) AND the
+   `promethium-operational-roles-<company>` stack's outputs (the 8 operational
+   role ARNs — a separate stack from Foundation; see "Why two CFTs" above).
 3. Clone the `<company>` branch of `promethium-internal-ie-aws` and pin its
    `main.tf` module ref.
 4. Render `terraform.tfvars` + `register-enable.auto.tfvars` + a partial
@@ -143,8 +145,10 @@ cluster's API).
    the VPC — delete its GuardDuty VPC endpoint, wait for the ENIs to clear,
    delete that security group, then delete the jumpbox and network stacks. A
    BYO VPC is never touched.
-8. Delete the foundation stack, then empty (all versions + delete markers,
-   including `_<company>-bundle/`) and delete the tfstate bucket.
+8. Delete the foundation stack, then the operational-roles stack (dependency-
+   free IAM — no VPC/ENI entanglements, so it deletes cleanly right alongside
+   Foundation), then empty (all versions + delete markers, including
+   `_<company>-bundle/`) and delete the tfstate bucket.
 9. Print zero-trace verification: IAM roles / S3 buckets / CFT stacks /
    Cognito user pools matching the company name — all should come back empty.
 
@@ -157,15 +161,16 @@ worker-node role, PG backup, Glue/Trino) two different ways:
 - **In-account installs**: Terraform (`module.iam_oidc` + `module.iam` in
   `iac-terraform-install-redesign/aws/infrastructure`) creates the roles
   directly.
-- **Customer-account (BYO) installs**: `AWS/CFT/foundation.yaml` creates the
-  same 8 roles up front (with a dummy OIDC provider URL), and Terraform later
-  patches just their trust policies to the real cluster once it exists (see
-  the deploy role's `iam-operational-role-trust-mgmt` inline policy and
+- **Customer-account (BYO) installs**: `AWS/CFT/operational_roles.yaml`
+  creates the same 8 roles up front (with a dummy OIDC provider URL), and
+  Terraform later patches just their trust policies to the real cluster once
+  it exists (see the deploy role's `iam-operational-role-trust-mgmt` inline
+  policy — in the sibling `AWS/CFT/foundation.yaml` stack — and
   `module.modify_iam_oidc_role_trust_policy` + `locals.tf`'s `role_config`).
 
 Nothing keeps these two definitions in sync automatically — a permission
 added to one and not the other is invisible until it breaks in the field.
-`check-role-drift.py` parses `foundation.yaml`, extracts each of the 8
+`check-role-drift.py` parses `operational_roles.yaml`, extracts each of the 8
 roles' trust subjects, direct service principals, attached managed-policy
 ARNs, and inline-policy statement action/resource sets, and diffs them
 against a hand-curated golden fixture, `role-drift-baseline.json`, derived
@@ -180,13 +185,13 @@ python3 AWS/scripts/check-role-drift.py --verbose  # print a line per passing ro
 
 No dependencies beyond the Python 3 standard library — deliberately: pyyaml
 is not installed in this environment/CI, and a full YAML parser is more than
-this needs. `foundation.yaml`'s role blocks are extracted with a small
+this needs. `operational_roles.yaml`'s role blocks are extracted with a small
 indentation-aware line scanner rather than a general YAML library (see the
 module docstring in the script for why this is safe: the trust/policy
 documents CloudFormation embeds as `Fn::Sub` block-scalar strings are already
 valid JSON before `${...}` substitution happens, since those tokens sit
 inside quoted strings, so they're handed straight to `json.loads()`). If a
-future change to `foundation.yaml` needs real YAML semantics the hand-rolled
+future change to `operational_roles.yaml` needs real YAML semantics the hand-rolled
 scanner can't handle, reach for `pyyaml` explicitly (add it to a
 `requirements.txt` next to the script) rather than extending the scanner
 indefinitely — but note that a generic YAML load still wouldn't resolve
@@ -201,10 +206,10 @@ found.
 
 ### When to run it
 
-- Locally, after editing `AWS/CFT/foundation.yaml`'s operational-role
+- Locally, after editing `AWS/CFT/operational_roles.yaml`'s operational-role
   resources, before opening a PR.
-- In CI, on every PR that touches `AWS/CFT/foundation.yaml` (wire it in as a
-  required check — it's fast and dependency-free).
+- In CI, on every PR that touches `AWS/CFT/operational_roles.yaml` (wire it in
+  as a required check — it's fast and dependency-free).
 - After a change lands in `iac-terraform-install-redesign`'s
   `module.iam_oidc`, `modules/iam`, or `locals.tf`'s `role_config` — this is
   when the *baseline* goes stale, not the CFT, and the check will start
@@ -235,9 +240,9 @@ it's a hand-curated fixture. Regenerate it by hand whenever
 If the script reports DRIFT, it means one of two things — figure out which
 before "fixing" anything:
 
-- **A real gap in `foundation.yaml`**: someone edited the CFT's operational
-  roles without carrying the same change into the CFT from the TF side (or
-  vice versa going forward). Fix `foundation.yaml`.
+- **A real gap in `operational_roles.yaml`**: someone edited the CFT's
+  operational roles without carrying the same change into the CFT from the TF
+  side (or vice versa going forward). Fix `operational_roles.yaml`.
 - **A stale baseline**: `iac-terraform-install-redesign` changed and nobody
   regenerated `role-drift-baseline.json` (see above). Fix the baseline, not
   the CFT.
@@ -366,12 +371,12 @@ Things guessed or deliberately not automated — read before relying on this:
   this is one person's machine, not portable. A shared install host needs its
   own clone and its own default.
 
-- **Network/foundation/jumpbox CFT stacks are read, not created, by
-  `deploy.sh`.** The "2 install commands" are (1) the CloudFormation
-  prerequisites — however many `aws cloudformation deploy` calls your topology
-  needs (network+foundation[+jumpbox] for greenfield, foundation[+jumpbox] for
-  BYO-VPC) — and (2) `deploy.sh` itself. `deploy.sh` errors clearly if
-  `promethium-foundation-<company>` doesn't exist yet, and (for the
+- **Network/foundation/operational-roles/jumpbox CFT stacks are read, not
+  created, by `deploy.sh`.** The "2 install commands" are (1) `./prereqs.sh`
+  — network.yaml (skipped for BYO VPC) + foundation.yaml +
+  operational_roles.yaml [+ jumpbox.yaml] — and (2) `deploy.sh` itself.
+  `deploy.sh` errors clearly if `promethium-foundation-<company>` or
+  `promethium-operational-roles-<company>` doesn't exist yet, and (for the
   non-BYO-VPC path) if `promethium-network-<company>` doesn't either.
 
 - **`destroy.sh`'s bucket-emptying and Cognito lookups need `jq`** (not
@@ -379,5 +384,8 @@ Things guessed or deliberately not automated — read before relying on this:
   `require_tools` in `lib-tenant.sh` alongside `aws`, `git`, `terraform`,
   `kubectl`, `envsubst`, `openssl`, `curl`, `sed`.
 
-- Neither script has been run. Static-checked with `bash -n` (both pass); no
-  `shellcheck` or `cfn-lint` available in this environment to run further.
+- None of the three scripts (`prereqs.sh`, `deploy.sh`, `destroy.sh`) has been
+  run end-to-end against a real account. Static-checked with `bash -n` (all
+  three pass). `AWS/CFT/foundation.yaml` and `AWS/CFT/operational_roles.yaml`
+  are `cfn-lint`-clean (v1.55.1); no `shellcheck` available in this
+  environment.

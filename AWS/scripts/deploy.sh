@@ -3,14 +3,17 @@
 # Promethium Intelligent-Edge — customer-account self-serve install
 # =============================================================================
 # Collapses the install to two commands:
-#   1. stand up the CloudFormation prerequisites (network+foundation[+jumpbox],
-#      or just foundation[+jumpbox] for a BYO VPC) — see AWS/scripts/README.md
+#   1. ./prereqs.sh <company> <environment> [--vpc-id ID --subnet-ids a,b,c]
+#      stands up the local CloudFormation prerequisites: network[skipped for
+#      BYO VPC] + foundation + operational_roles [+ jumpbox] — see
+#      AWS/scripts/README.md.
 #   2. ./deploy.sh <company> <environment> [--vpc-id ID --subnet-ids a,b,c]
 #
 # This script does everything after the CFT stacks exist: resolves the VPC +
-# Foundation stack outputs, renders this tenant's terraform.tfvars, applies the
-# Terraform (EKS + infra + tenant registration), then enrolls the argocd-agent
-# (Model A') — hub-side cert issuance + spoke-side agent install.
+# the Foundation/operational-roles stack outputs, renders this tenant's
+# terraform.tfvars, applies the Terraform (EKS + infra + tenant registration),
+# then enrolls the argocd-agent (Model A') — hub-side cert issuance +
+# spoke-side agent install.
 #
 # WHERE TO RUN THIS: on a host with (a) the customer AWS credentials active
 # (e.g. the promethium-jumpbox-<company> instance profile) and (b) private
@@ -120,6 +123,7 @@ AWS_REGION="${AWS_REGION:-us-east-1}"
 
 NETWORK_STACK="promethium-network-${COMPANY_NAME}"
 FOUNDATION_STACK="promethium-foundation-${COMPANY_NAME}"
+OPROLES_STACK="promethium-operational-roles-${COMPANY_NAME}"
 REPO_DIR="${WORKDIR}/promethium-internal-ie-aws-${COMPANY_NAME}"
 BYO_VPC=false; [ -n "$VPC_ID_OVERRIDE" ] && BYO_VPC=true
 
@@ -131,6 +135,7 @@ cat <<PLAN
   region               : ${AWS_REGION}
   VPC                  : $([ "$BYO_VPC" = true ] && echo "BYO (${VPC_ID_OVERRIDE})" || echo "from stack ${NETWORK_STACK}")
   foundation stack     : ${FOUNDATION_STACK}
+  operational roles    : ${OPROLES_STACK}
   iac-terraform ref    : ${IAC_REF}
   eks version          : ${EKS_VERSION}
   image tag            : ${PROMETHIUM_IMAGE_TAG}
@@ -164,20 +169,28 @@ else
   echo "  ${NETWORK_STACK}: VPC ${VPC_ID} (${VPC_CIDR}), subnets ${SUBNET1_ID},${SUBNET2_ID},${SUBNET3_ID}"
 fi
 
-# ---- Step 2: Foundation stack outputs ----------------------------------------
-echo; echo "== Step 2: Foundation stack outputs (${FOUNDATION_STACK}) =="
-stack_exists "$FOUNDATION_STACK" "$AWS_REGION" || { echo "ERROR: stack ${FOUNDATION_STACK} not found in ${AWS_REGION} — deploy AWS/CFT/foundation.yaml first" >&2; exit 1; }
+# ---- Step 2: Foundation + operational-roles stack outputs --------------------
+# The 8 operational role ARNs live in the SEPARATE promethium-operational-roles-
+# <company> stack, not in Foundation — foundation.yaml was split into two CFTs
+# (Foundation: deploy role + tfstate bucket; operational_roles.yaml: the 8
+# EKS/OIDC roles) so each rendered template stays under CloudFormation's
+# 51,200-byte inline (--template-file) size limit. See AWS/scripts/prereqs.sh,
+# which deploys both.
+echo; echo "== Step 2: Foundation + operational-roles stack outputs =="
+stack_exists "$FOUNDATION_STACK" "$AWS_REGION" || { echo "ERROR: stack ${FOUNDATION_STACK} not found in ${AWS_REGION} — run AWS/scripts/prereqs.sh first" >&2; exit 1; }
 DEPLOY_ROLE_ARN=$(stack_output "$FOUNDATION_STACK" DeployRoleArn "$AWS_REGION")
 INSTANCE_PROFILE_NAME=$(stack_output "$FOUNDATION_STACK" InstanceProfileName "$AWS_REGION")
 TF_STATE_BUCKET=$(stack_output "$FOUNDATION_STACK" TfStateBucket "$AWS_REGION")
-EBS_ROLE_ARN=$(stack_output "$FOUNDATION_STACK" EBSCSIDriverRoleArn "$AWS_REGION")
-EFS_ROLE_ARN=$(stack_output "$FOUNDATION_STACK" EFSCSIDriverRoleArn "$AWS_REGION")
-LB_ROLE_ARN=$(stack_output "$FOUNDATION_STACK" LoadBalancerControllerRoleArn "$AWS_REGION")
-CA_ROLE_ARN=$(stack_output "$FOUNDATION_STACK" ClusterAutoscalerRoleArn "$AWS_REGION")
-EKS_CLUSTER_ROLE_ARN=$(stack_output "$FOUNDATION_STACK" EKSClusterRoleArn "$AWS_REGION")
-EKS_WORKER_ROLE_ARN=$(stack_output "$FOUNDATION_STACK" EKSWorkerNodeRoleArn "$AWS_REGION")
-PG_BACKUP_ROLE_ARN=$(stack_output "$FOUNDATION_STACK" PGBackupServiceRoleArn "$AWS_REGION")
-TRINO_ROLE_ARN=$(stack_output "$FOUNDATION_STACK" GlueTrinoServiceRoleArn "$AWS_REGION")
+
+stack_exists "$OPROLES_STACK" "$AWS_REGION" || { echo "ERROR: stack ${OPROLES_STACK} not found in ${AWS_REGION} — run AWS/scripts/prereqs.sh first" >&2; exit 1; }
+EBS_ROLE_ARN=$(stack_output "$OPROLES_STACK" EBSCSIDriverRoleArn "$AWS_REGION")
+EFS_ROLE_ARN=$(stack_output "$OPROLES_STACK" EFSCSIDriverRoleArn "$AWS_REGION")
+LB_ROLE_ARN=$(stack_output "$OPROLES_STACK" LoadBalancerControllerRoleArn "$AWS_REGION")
+CA_ROLE_ARN=$(stack_output "$OPROLES_STACK" ClusterAutoscalerRoleArn "$AWS_REGION")
+EKS_CLUSTER_ROLE_ARN=$(stack_output "$OPROLES_STACK" EKSClusterRoleArn "$AWS_REGION")
+EKS_WORKER_ROLE_ARN=$(stack_output "$OPROLES_STACK" EKSWorkerNodeRoleArn "$AWS_REGION")
+PG_BACKUP_ROLE_ARN=$(stack_output "$OPROLES_STACK" PGBackupServiceRoleArn "$AWS_REGION")
+TRINO_ROLE_ARN=$(stack_output "$OPROLES_STACK" GlueTrinoServiceRoleArn "$AWS_REGION")
 echo "  deploy role   : ${DEPLOY_ROLE_ARN}"
 echo "  tfstate bucket: ${TF_STATE_BUCKET}"
 
