@@ -601,6 +601,17 @@ Resources:
         - !Ref TerraformACMPolicy
         - !Ref TerraformGluePolicy
       Policies:
+        # deploy.sh (running as this role on the jumpbox) reads the network /
+        # foundation / operational-roles stack Outputs to render terraform.tfvars.
+        - PolicyName: cloudformation-read-prereqs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: CloudFormationReadPrereqs
+                Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
+                Resource: !Sub 'arn:aws:cloudformation:*:${AWS::AccountId}:stack/promethium-*'
         - PolicyName: registry-invoke
           PolicyDocument:
             Version: '2012-10-17'
