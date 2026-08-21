@@ -331,7 +331,12 @@ Resources:
             Action:
               - iam:CreateServiceLinkedRole
               - iam:DeleteServiceLinkedRole
-              - iam:GetRole
+            # NOTE: iam:GetRole was here too, gated on iam:AWSServiceName — but that
+            # condition key is only populated for CreateServiceLinkedRole/
+            # DeleteServiceLinkedRole calls, never for a plain GetRole, so the grant
+            # was dead. EKS CreateNodegroup does an UNCONDITIONED GetRole on the SLR
+            # (AWSServiceRoleForAmazonEKSNodegroup) to check existence; that is
+            # covered by the aws-service-role/* resource on IAMGetRoleForEKS below.
             Resource: '*'
             Condition:
               StringEquals:
@@ -343,7 +348,12 @@ Resources:
           - Sid: IAMGetRoleForEKS
             Effect: Allow
             Action: iam:GetRole
-            Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/promethium-*'
+            Resource:
+              - !Sub 'arn:aws:iam::${AWS::AccountId}:role/promethium-*'
+              # EKS CreateNodegroup/CreateCluster GetRole the service-linked roles
+              # (eks-nodegroup/eks/eks-addons) to validate they exist. Read-only on
+              # AWS-managed SLRs, in-account only.
+              - !Sub 'arn:aws:iam::${AWS::AccountId}:role/aws-service-role/*'
           - Sid: OIDCProviderManagement
             Effect: Allow
             Action:
