@@ -39,7 +39,10 @@
 #                                     in main.tf. default: feat/ie-carveout-dev2
 #   --eks-version V                  default: 1.35
 #   --image-tag TAG                  default: 24.6.0
-#   --loadbalancer-type TYPE         internet-facing | internal. default: internet-facing
+#   --loadbalancer-type TYPE         internet-facing | internal. default: internal
+#                                    (customer installs = private cluster + internal ALB,
+#                                    validated via in-VPC curl; pass internet-facing only
+#                                    for internal Promethium public-cluster deployments)
 #   --registry-api-url URL           default: derived, see ASSUMPTIONS in README
 #   --operator-email EMAIL           default: support@promethium.ai
 #   --jumpbox-sg-id SG               default: self-discovered via IMDSv2
@@ -70,7 +73,7 @@ AWS_REGION="${AWS_REGION:-}"
 IAC_REF="feat/ie-carveout-dev2"
 EKS_VERSION="1.35"
 PROMETHIUM_IMAGE_TAG="24.6.0"
-LOADBALANCER_TYPE="internet-facing"
+LOADBALANCER_TYPE="internal"
 TENANT_REGISTRY_API_URL=""
 OPERATOR_EMAIL="support@promethium.ai"
 JUMPBOX_SG_ID_OVERRIDE=""
