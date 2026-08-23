@@ -411,6 +411,35 @@ if [ -z "$IE_ECR_OCI_PW_DECODED" ]; then
   exit 1
 fi
 echo "  ie-ecr-oci password present (${#IE_ECR_OCI_PW_DECODED} bytes)."
+
+# ---- Step 9b: seed the intelligentedge image-pull secret (agent BYO) ----------
+# The OCI umbrella's pods pull container images cross-account from 734 ECR via
+# aws-ecr-docker-creds. In BYO the internal 10-min ecr-cron-job (same-account
+# design) does not provide this, so seed it here from the refresher token once
+# Argo has created the intelligentedge namespace, and give the ns default SA the
+# pull secret (bitnami postgres + any secret-less pod rely on the SA-injected
+# one). One-shot — the ECR token TTL (~12h) covers an install/demo; the durable
+# 6h refresh of THIS secret is tracked as codify C (umbrella/refresher).
+echo "  seeding intelligentedge image-pull secret (aws-ecr-docker-creds)..."
+for i in $(seq 1 30); do
+  kubectl --context "$SPOKE_CONTEXT" get ns intelligentedge >/dev/null 2>&1 && break
+  [ "$i" = 1 ] && echo "    waiting for the intelligentedge namespace (Argo umbrella sync)..."
+  sleep 10
+done
+if kubectl --context "$SPOKE_CONTEXT" get ns intelligentedge >/dev/null 2>&1; then
+  kubectl --context "$SPOKE_CONTEXT" -n intelligentedge create secret docker-registry aws-ecr-docker-creds \
+    --docker-server=734236616923.dkr.ecr.us-west-1.amazonaws.com \
+    --docker-username=AWS --docker-password="$IE_ECR_OCI_PW_DECODED" \
+    --dry-run=client -o yaml | kubectl --context "$SPOKE_CONTEXT" apply -f -
+  kubectl --context "$SPOKE_CONTEXT" -n intelligentedge patch sa default \
+    -p '{"imagePullSecrets":[{"name":"aws-ecr-docker-creds"}]}' >/dev/null 2>&1 || true
+  # bitnami postgres injects the pull secret from its SA at pod-creation → recreate the stuck pod
+  kubectl --context "$SPOKE_CONTEXT" -n intelligentedge delete pod -l app.kubernetes.io/name=postgresql >/dev/null 2>&1 || true
+  echo "  seeded aws-ecr-docker-creds + patched default SA in intelligentedge."
+else
+  echo "  WARN: intelligentedge namespace not present after ~5m — image pull will stall until aws-ecr-docker-creds is seeded there." >&2
+fi
+
 if kubectl --context "$SPOKE_CONTEXT" -n intelligentedge get secret aws-ecr-docker-creds >/dev/null 2>&1; then
   echo "  aws-ecr-docker-creds present in intelligentedge."
 else
