@@ -1,10 +1,10 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
   Promethium Intelligent Edge — Operational roles stack for a customer-account
-  install. Creates the 8 EKS/OIDC "operational" roles (EBS CSI driver, EFS CSI
+  install. Creates the 9 EKS/OIDC "operational" roles (EBS CSI driver, EFS CSI
   driver, LB controller, cluster autoscaler, EKS cluster role, EKS worker-node
-  role, PG backup, Glue/Trino) plus the Lambda-backed TagResolver custom
-  resource used to tag them.
+  role, PG backup, Glue/Trino, ArgoCD ECR refresher) plus the Lambda-backed
+  TagResolver custom resource used to tag them.
 
   Split out of foundation.yaml (which now holds only the Terraform
   deploy/install role + tfstate bucket) so each rendered template stays under
@@ -265,7 +265,7 @@ Resources:
       CustomTags: !Ref CustomTags
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # 8 operational roles — env-aware default names:
+  # 9 operational roles — env-aware default names:
   # promethium-${Environment}-${CompanyName}-<role>. Trust `sub` conditions and
   # policies carry the AllowGlueService/self-PassRole (GlueTrinoServiceRole)
   # and rasa-namespace (PGBackupServiceRole) fixes — see
