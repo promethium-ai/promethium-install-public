@@ -41,6 +41,12 @@ Metadata:
           - EKSWorkerNodeRoleName
           - PGBackupServiceRoleName
           - GlueTrinoServiceRoleName
+          - ArgocdEcrRefresherRoleName
+      - Label:
+          default: "ECR Registry (Advanced)"
+        Parameters:
+          - EcrRegistryAccountId
+          - EcrRegion
       - Label:
           default: "Tagging Options"
         Parameters:
@@ -134,6 +140,21 @@ Parameters:
     Default: ''
     Description: Custom name for Glue Trino Service role (optional)
 
+  ArgocdEcrRefresherRoleName:
+    Type: String
+    Default: ''
+    Description: Custom name for Argo CD ECR credential refresher role (optional)
+
+  EcrRegistryAccountId:
+    Type: String
+    Default: '734236616923'
+    Description: AWS account ID hosting the Promethium ECR registry that the Argo CD ECR credential refresher pulls images from.
+
+  EcrRegion:
+    Type: String
+    Default: us-west-1
+    Description: AWS region of the Promethium ECR registry that the Argo CD ECR credential refresher pulls images from.
+
   TagMode:
     Type: String
     Default: default
@@ -165,6 +186,7 @@ Conditions:
   HasCustomEKSWorkerRoleName: !Not [!Equals [!Ref EKSWorkerNodeRoleName, '']]
   HasCustomPGBackupRoleName: !Not [!Equals [!Ref PGBackupServiceRoleName, '']]
   HasCustomGlueTrinoRoleName: !Not [!Equals [!Ref GlueTrinoServiceRoleName, '']]
+  HasCustomArgocdEcrRefresherRoleName: !Not [!Equals [!Ref ArgocdEcrRefresherRoleName, '']]
 
 Resources:
 
@@ -880,6 +902,54 @@ Resources:
                   StringEquals:
                     iam:PassedToService: glue.amazonaws.com
 
+  ArgocdEcrRefresherRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !If
+        - HasCustomArgocdEcrRefresherRoleName
+        - !Ref ArgocdEcrRefresherRoleName
+        - !Sub 'promethium-${Environment}-${CompanyName}-argocd-ecr-refresher'
+      AssumeRolePolicyDocument:
+        Fn::Sub:
+          - |
+            {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Principal": {
+                    "Federated": "arn:aws:iam::${AWS::AccountId}:oidc-provider/${OIDCProviderUrl}"
+                  },
+                  "Action": "sts:AssumeRoleWithWebIdentity",
+                  "Condition": {
+                    "StringEquals": {
+                      "${OIDCProviderUrl}:sub": "system:serviceaccount:argocd:argocd-ecr-cred-refresher"
+                    }
+                  }
+                }
+              ]
+            }
+          - OIDCProviderUrl: !Ref OIDCProviderUrl
+      Path: /
+      Tags: !GetAtt TagResolver.Tags
+      Policies:
+        - PolicyName: ArgocdEcrRefresherPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: EcrAuthToken
+                Action:
+                  - ecr:GetAuthorizationToken
+                Effect: Allow
+                Resource: '*'
+              - Sid: EcrPull
+                Action:
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchCheckLayerAvailability
+                Effect: Allow
+                Resource: !Sub 'arn:aws:ecr:${EcrRegion}:${EcrRegistryAccountId}:repository/*'
+
 Outputs:
   EBSCSIDriverRoleArn:
     Description: ARN of the EBS CSI Driver role
@@ -928,3 +998,9 @@ Outputs:
     Value: !GetAtt GlueTrinoServiceRole.Arn
     Export:
       Name: !Sub ${AWS::StackName}-GlueTrinoRoleArn
+
+  ArgocdEcrRefresherRoleArn:
+    Description: ARN of the ArgoCD ECR credential refresher role
+    Value: !GetAtt ArgocdEcrRefresherRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-ArgocdEcrRefresherRoleArn
