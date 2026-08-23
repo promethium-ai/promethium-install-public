@@ -265,6 +265,22 @@ if [ "$ASSUME_YES" != true ]; then
   [ "$ans" = "y" ] || [ "$ans" = "Y" ] || { echo "aborted — complete the S4 grants first (see README.md)"; exit 1; }
 fi
 
+# ---- Step 5b: agent-mode preflight — operational-roles refresher output ------
+# Fail fast on the #1 silent agent-mode failure: if operational_roles.yaml
+# predates the refresher-role codify its stack has no ArgocdEcrRefresherRoleArn
+# output, so Step 7's apply never wires the ECR/IRSA image-pull chain and the
+# umbrella OCI sync stalls ~90% in (ImagePullBackOff) instead of failing here.
+# Read-only + idempotent; skipped for --skip-agent (infra-only) runs.
+if [ "$SKIP_AGENT" != true ]; then
+  echo; echo "== Step 5b: agent-mode preflight — operational-roles refresher output =="
+  REFRESHER_ROLE_ARN="$(stack_output "$OPROLES_STACK" ArgocdEcrRefresherRoleArn "$AWS_REGION" 2>/dev/null || true)"
+  if [ -z "$REFRESHER_ROLE_ARN" ]; then
+    echo "ERROR: operational_roles.yaml stack '${OPROLES_STACK}' has no ArgocdEcrRefresherRoleArn output — it predates the refresher-role codify. Re-deploy the operational-roles stack from the current CFT (prereqs.sh) before continuing." >&2
+    exit 1
+  fi
+  echo "  refresher role: ${REFRESHER_ROLE_ARN}"
+fi
+
 # ---- Step 6: terraform init ---------------------------------------------------
 echo; echo "== Step 6: terraform init (S3 backend, no DynamoDB) =="
 (
@@ -381,6 +397,25 @@ SPOKE_CONTEXT="$(kubectl config current-context)"
 chmod +x "${SCRIPT_DIR}/../agent/install-agent.sh"
 printf 'y\n' | "${SCRIPT_DIR}/../agent/install-agent.sh" \
   --config "$AGENT_ENV_FILE" --bundle "$BUNDLE_DIR" --context "$SPOKE_CONTEXT"
+
+# ---- Step 9 verify: ECR image-pull credential chain (agent-mode fail-fast) ---
+# Surface the #1 silent agent-mode failure here at minute ~1 instead of a
+# mid-umbrella (~90%) ImagePullBackOff hang: the refresher must have written a
+# usable OCI pull credential into argocd/ie-ecr-oci. Read-only + idempotent.
+echo; echo "== Step 9 verify: ECR image-pull credentials on the spoke =="
+IE_ECR_OCI_PW="$(kubectl --context "$SPOKE_CONTEXT" -n argocd get secret ie-ecr-oci \
+  -o jsonpath='{.data.password}' 2>/dev/null || true)"
+IE_ECR_OCI_PW_DECODED="$(printf '%s' "$IE_ECR_OCI_PW" | base64 -d 2>/dev/null || true)"
+if [ -z "$IE_ECR_OCI_PW_DECODED" ]; then
+  echo "ERROR: argocd secret 'ie-ecr-oci' has no usable password — the ECR OCI pull credential was never written. The refresher role 'promethium-${ENVIRONMENT}-${COMPANY_NAME}-argocd-ecr-refresher' must exist and be assumable (IRSA), and the 734236616923 ECR repo policy must grant it pull. The umbrella OCI sync will fail until this is fixed." >&2
+  exit 1
+fi
+echo "  ie-ecr-oci password present (${#IE_ECR_OCI_PW_DECODED} bytes)."
+if kubectl --context "$SPOKE_CONTEXT" -n intelligentedge get secret aws-ecr-docker-creds >/dev/null 2>&1; then
+  echo "  aws-ecr-docker-creds present in intelligentedge."
+else
+  echo "  WARN: intelligentedge secret 'aws-ecr-docker-creds' not present yet — the namespace may not exist until the umbrella first syncs. Pods will ImagePullBackOff until the refresher writes this image-pull secret." >&2
+fi
 
 echo
 echo "== DONE. ${COMPANY_NAME}/${ENVIRONMENT} deployed. =="
