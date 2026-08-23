@@ -71,6 +71,14 @@ Mappings:
       Owner: support@promethium.ai
       createdBy: CloudFormation
       Project: Intelligentedge
+  # Control-plane / hub account per environment — holds the SaaS-assume role the
+  # deploy role assumes for the tenant's DNS/ACM cert (cert_manager). ECR is
+  # always 734 regardless (see install-agent). Keyed by Environment.
+  HubAccount:
+    dev:     { Id: '734236616923' }
+    qa:      { Id: '734236616923' }
+    preview: { Id: '308611924187' }
+    prod:    { Id: '308611924187' }
 
 Conditions:
   HasCustomInstallRoleName: !Not [!Equals [!Ref PromethiumInstallRole, '']]
@@ -755,6 +763,25 @@ Resources:
                   - HasCustomInstallRoleName
                   - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${PromethiumInstallRole}'
                   - !Sub 'arn:aws:iam::${AWS::AccountId}:role/promethium-${Environment}-${CompanyName}-terraform-deploy-role'
+        - PolicyName: assume-hub-saas-role
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # cert_manager's AWS provider assumes the hub-account SaaS role to
+              # manage the tenant's public DNS + ACM cert (Route53/cert live in the
+              # Promethium hub account: 734 dev/qa, 308 preview/prod). Cross-account
+              # AssumeRole needs BOTH sides — this identity grant AND the hub
+              # saas-role trust listing this deploy role. Without it the apply dies
+              # at module.aws.module.certificate_manager
+              # "IAM Role ...:role/promethium-terraform-saas-assume-role cannot be assumed".
+              # NOTE: goes away when DNS/cert move hub-side (S2 — customer TF assumes
+              # ZERO Promethium roles). Baked now because S2 isn't shipped yet.
+              - Sid: AssumeHubSaasRole
+                Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Sub
+                  - 'arn:aws:iam::${HubAcct}:role/promethium-terraform-saas-assume-role'
+                  - HubAcct: !FindInMap [HubAccount, !Ref Environment, Id]
       Tags:
         - Key: Environment
           Value: !Ref Environment
