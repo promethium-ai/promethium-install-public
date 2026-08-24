@@ -113,6 +113,19 @@ Resources:
         - HasInstanceProfile
         - !Ref UseExistingInstanceProfile
         - !Ref AWS::NoValue
+      UserData:
+        # Bootstrap operator tooling at boot so deploy.sh runs without hand-
+        # installing git/terraform/kubectl/helm on the (bare AL2023) jumpbox. The
+        # private install repo is cloned by the operator with their own GitHub
+        # auth (one command) — no credential is baked into the AMI/UserData.
+        Fn::Base64: |
+          #!/bin/bash
+          set -x
+          dnf -y install git dnf-plugins-core >/dev/null 2>&1
+          dnf config-manager --add-repo https://rpm.releases.hashicorp.com/AmazonLinux/hashicorp.repo >/dev/null 2>&1
+          dnf -y install terraform >/dev/null 2>&1
+          curl -sLo /usr/local/bin/kubectl "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && chmod +x /usr/local/bin/kubectl
+          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash >/dev/null 2>&1
       BlockDeviceMappings:
         - DeviceName: /dev/xvda
           Ebs:

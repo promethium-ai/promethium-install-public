@@ -182,6 +182,35 @@ note "restart the agent to pick up params + secrets"
 kc -n argocd rollout restart deployment/argocd-agent-agent
 kc -n argocd rollout status  deployment/argocd-agent-agent --timeout=180s
 
+# ---- 7. seed the intelligentedge image-pull secret (agent BYO) --------------
+# The OCI umbrella's pods pull container images cross-account from ECR via
+# aws-ecr-docker-creds. In BYO the same-account 10-min ecr-cron-job does not
+# provide this, so seed it here from the refresher's ie-ecr-oci token once the
+# hub Application has created the intelligentedge namespace, and give EVERY ns
+# SA the pull secret (bitnami postgres + trino's presto-catalog-account/trino-sa
+# use named SAs, not just default). One-shot — the ECR token TTL covers an
+# install/demo; the durable 6h refresh is tracked as codify C.
+: "${ECR_REGISTRY:=734236616923.dkr.ecr.us-west-1.amazonaws.com}"
+note "waiting for the intelligentedge namespace (hub umbrella sync) to seed the image-pull secret..."
+for _ in $(seq 1 30); do kc get ns intelligentedge >/dev/null 2>&1 && break; sleep 10; done
+if kc get ns intelligentedge >/dev/null 2>&1; then
+  IE_PW="$(kc -n argocd get secret ie-ecr-oci -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || true)"
+  if [ -n "$IE_PW" ]; then
+    kc -n intelligentedge create secret docker-registry aws-ecr-docker-creds \
+      --docker-server="${ECR_REGISTRY}" --docker-username=AWS --docker-password="$IE_PW" \
+      --dry-run=client -o yaml | kc apply -f -
+    for sa in $(kc -n intelligentedge get sa -o name 2>/dev/null | sed 's|serviceaccount/||'); do
+      kc -n intelligentedge patch sa "$sa" -p '{"imagePullSecrets":[{"name":"aws-ecr-docker-creds"}]}' >/dev/null 2>&1 || true
+    done
+    kc -n intelligentedge delete pod --field-selector=status.phase!=Succeeded >/dev/null 2>&1 || true
+    note "seeded aws-ecr-docker-creds + patched intelligentedge SAs."
+  else
+    note "WARN: argocd/ie-ecr-oci has no password yet — image pull may stall until the refresher writes it."
+  fi
+else
+  note "WARN: intelligentedge namespace not present after ~5m — image pull will stall until aws-ecr-docker-creds is seeded there."
+fi
+
 echo
 note "DONE. Agent installed and dialing out to ${PRINCIPAL_ADDRESS}:${PRINCIPAL_PORT}."
 kc -n argocd get pods | grep argocd-agent || true
