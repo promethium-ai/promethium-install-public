@@ -330,6 +330,35 @@ CLUSTER_NAME="promethium-datafabric-${ENVIRONMENT}-${COMPANY_NAME}-eks-cluster"
 )
 echo "  cluster + infra + tenant registration complete."
 
+# ---- Step 7d: verify the tenant file reached the hub-read branch --------------
+# The registry-writer API commits tenants/<env>/<co>.yaml and auto-merges it to
+# the branch the hub agent-appset reads (feature/argo-runner-appsets). A stale or
+# no-op merge (e.g. re-registering an existing tenant name) leaves the appset on
+# an OLD file -> the hub renders trino with the wrong tenantId + cognito pool and
+# the coordinator crashloops. Catch that HERE, at register time, instead of as a
+# mid-demo trino crash. Needs GITHUB_TOKEN (read on the gitops repo); skipped with
+# a note if unset.
+REG_TENANT_ID=$( cd "$REPO_DIR" && terraform output -json tenant_registration 2>/dev/null | grep -oE '"tenant_id":"[^"]+"' | head -1 | cut -d'"' -f4 )
+HUB_BRANCH="feature/argo-runner-appsets"
+GITOPS_REPO="promethium-ai/promethium-gitops"
+if [ -n "$REG_TENANT_ID" ] && [ -n "${GITHUB_TOKEN:-}" ]; then
+  echo "  7d. verifying tenants/${ENVIRONMENT}/${COMPANY_NAME}.yaml on ${HUB_BRANCH} carries tenantId=${REG_TENANT_ID}..."
+  ok=false
+  for i in $(seq 1 12); do
+    body=$(curl -s -H "Authorization: token ${GITHUB_TOKEN}" -H "Accept: application/vnd.github.raw" \
+      "https://api.github.com/repos/${GITOPS_REPO}/contents/tenants/${ENVIRONMENT}/${COMPANY_NAME}.yaml?ref=${HUB_BRANCH}" 2>/dev/null || true)
+    printf '%s' "$body" | grep -q "tenantId: ${REG_TENANT_ID}" && { ok=true; break; }
+    echo "     [$i] not on ${HUB_BRANCH} yet (auto-merge lag), waiting 15s..."; sleep 15
+  done
+  if [ "$ok" != true ]; then
+    echo "ERROR: tenants/${ENVIRONMENT}/${COMPANY_NAME}.yaml on ${HUB_BRANCH} does not show tenantId=${REG_TENANT_ID} — the registry-writer auto-merge to the hub-read branch did not land (stale/no-op merge, e.g. a reused tenant name). The hub will render trino with the WRONG tenant values and the coordinator will crashloop. Land the fresh tenant file on ${HUB_BRANCH} before enrolling the agent." >&2
+    exit 1
+  fi
+  echo "     tenant file on ${HUB_BRANCH} matches the registered id ✓"
+else
+  echo "  7d. (tenant-file verify skipped — export GITHUB_TOKEN to enable; otherwise confirm tenants/${ENVIRONMENT}/${COMPANY_NAME}.yaml on ${HUB_BRANCH} shows tenantId=${REG_TENANT_ID} by hand before agent enroll)"
+fi
+
 if [ "$SKIP_AGENT" = true ]; then
   echo; echo "== --skip-agent: stopping before agent enrollment. Infra-only deploy complete. =="
   exit 0
