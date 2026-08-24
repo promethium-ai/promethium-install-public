@@ -1,21 +1,18 @@
 AWSTemplateFormatVersion: '2010-09-09'
+# Split out of foundation.yaml (which holds only the Terraform deploy/install
+# role + tfstate bucket) so each rendered template stays under CloudFormation's
+# 51,200-byte inline (--template-file, no S3 bucket) size limit. prereqs.sh
+# deploys foundation.yaml then this stack (then, optionally, jumpbox.yaml) in
+# order. Deploy AFTER foundation.yaml with OIDCProviderUrl at its dummy default;
+# Terraform creates the real cluster + OIDC provider, then patches these roles'
+# trust policies to the real URL via iam:UpdateAssumeRolePolicy (see
+# foundation.yaml's TerraformInstallRole iam-operational-role-trust-mgmt policy).
 Description: >
-  Promethium Intelligent Edge — Operational roles stack for a customer-account
-  install. Creates the 9 EKS/OIDC "operational" roles (EBS CSI driver, EFS CSI
-  driver, LB controller, cluster autoscaler, EKS cluster role, EKS worker-node
-  role, PG backup, Glue/Trino, ArgoCD ECR refresher) plus the Lambda-backed
-  TagResolver custom resource used to tag them.
-
-  Split out of foundation.yaml (which now holds only the Terraform
-  deploy/install role + tfstate bucket) so each rendered template stays under
-  CloudFormation's 51,200-byte inline (--template-file, no S3 bucket) size
-  limit — see AWS/scripts/prereqs.sh, which deploys foundation.yaml then this
-  stack (then, optionally, jumpbox.yaml) in order. Deploy this AFTER
-  foundation.yaml, with OIDCProviderUrl left at its dummy default — Terraform
-  creates the real cluster and OIDC provider afterwards, then patches these
-  roles' trust policies to the real URL via iam:UpdateAssumeRolePolicy (see
-  foundation.yaml's TerraformInstallRole iam-operational-role-trust-mgmt
-  inline policy).
+  Promethium Intelligent Edge — the 9 EKS/OIDC operational roles (EBS/EFS CSI
+  drivers, LB controller, cluster autoscaler, EKS cluster + worker-node, PG
+  backup, Glue/Trino, ArgoCD ECR refresher) plus the Lambda-backed TagResolver
+  custom resource. Deploy after foundation.yaml; OIDC trust is patched by
+  Terraform post-cluster.
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -288,9 +285,9 @@ Resources:
                 {
                   "Effect": "Allow",
                   "Principal": {
-                    "Federated": "arn:aws:iam::${AWS::AccountId}:oidc-provider/${OIDCProviderUrl}"
+                    "AWS": "arn:aws:iam::${AWS::AccountId}:root"
                   },
-                  "Action": "sts:AssumeRoleWithWebIdentity",
+                  "Action": "sts:AssumeRole",
                   "Condition": {
                     "StringEquals": {
                       "${OIDCProviderUrl}:sub": "system:serviceaccount:kube-system:ebs-csi-controller-sa"
@@ -343,9 +340,9 @@ Resources:
                 {
                   "Effect": "Allow",
                   "Principal": {
-                    "Federated": "arn:aws:iam::${AWS::AccountId}:oidc-provider/${OIDCProviderUrl}"
+                    "AWS": "arn:aws:iam::${AWS::AccountId}:root"
                   },
-                  "Action": "sts:AssumeRoleWithWebIdentity",
+                  "Action": "sts:AssumeRole",
                   "Condition": {
                     "StringEquals": {
                       "${OIDCProviderUrl}:sub": "system:serviceaccount:kube-system:efs-csi-controller-sa"
@@ -402,9 +399,9 @@ Resources:
                 {
                   "Effect": "Allow",
                   "Principal": {
-                    "Federated": "arn:aws:iam::${AWS::AccountId}:oidc-provider/${OIDCProviderUrl}"
+                    "AWS": "arn:aws:iam::${AWS::AccountId}:root"
                   },
-                  "Action": "sts:AssumeRoleWithWebIdentity",
+                  "Action": "sts:AssumeRole",
                   "Condition": {
                     "StringEquals": {
                       "${OIDCProviderUrl}:sub": "system:serviceaccount:kube-system:aws-load-balancer-controller"
@@ -609,9 +606,9 @@ Resources:
                 {
                   "Effect": "Allow",
                   "Principal": {
-                    "Federated": "arn:aws:iam::${AWS::AccountId}:oidc-provider/${OIDCProviderUrl}"
+                    "AWS": "arn:aws:iam::${AWS::AccountId}:root"
                   },
-                  "Action": "sts:AssumeRoleWithWebIdentity",
+                  "Action": "sts:AssumeRole",
                   "Condition": {
                     "StringEquals": {
                       "${OIDCProviderUrl}:sub": "system:serviceaccount:kube-system:cluster-autoscaler"
@@ -736,9 +733,9 @@ Resources:
                 {
                   "Effect": "Allow",
                   "Principal": {
-                    "Federated": "arn:aws:iam::${AWS::AccountId}:oidc-provider/${OIDCProviderUrl}"
+                    "AWS": "arn:aws:iam::${AWS::AccountId}:root"
                   },
-                  "Action": "sts:AssumeRoleWithWebIdentity",
+                  "Action": "sts:AssumeRole",
                   "Condition": {
                     "StringEquals": {
                       "${OIDCProviderUrl}:sub": [
@@ -805,9 +802,9 @@ Resources:
                 {
                   "Effect": "Allow",
                   "Principal": {
-                    "Federated": "arn:aws:iam::${AWS::AccountId}:oidc-provider/${OIDCProviderUrl}"
+                    "AWS": "arn:aws:iam::${AWS::AccountId}:root"
                   },
-                  "Action": "sts:AssumeRoleWithWebIdentity",
+                  "Action": "sts:AssumeRole",
                   "Condition": {
                     "StringEquals": {
                       "${OIDCProviderUrl}:sub": "system:serviceaccount:intelligentedge:trino-sa"
@@ -896,8 +893,8 @@ Resources:
                 Effect: Allow
                 Resource: !If
                   - HasCustomGlueTrinoRoleName
-                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${GlueTrinoServiceRoleName}'
-                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/promethium-${Environment}-${CompanyName}-trino-oidc-role'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${GlueTrinoServiceRoleName}*'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/promethium-${Environment}-${CompanyName}-trino-oidc-role*'
                 Condition:
                   StringEquals:
                     iam:PassedToService: glue.amazonaws.com
@@ -918,9 +915,9 @@ Resources:
                 {
                   "Effect": "Allow",
                   "Principal": {
-                    "Federated": "arn:aws:iam::${AWS::AccountId}:oidc-provider/${OIDCProviderUrl}"
+                    "AWS": "arn:aws:iam::${AWS::AccountId}:root"
                   },
-                  "Action": "sts:AssumeRoleWithWebIdentity",
+                  "Action": "sts:AssumeRole",
                   "Condition": {
                     "StringEquals": {
                       "${OIDCProviderUrl}:sub": "system:serviceaccount:argocd:argocd-ecr-cred-refresher"
