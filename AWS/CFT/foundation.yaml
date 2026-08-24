@@ -724,6 +724,25 @@ Resources:
                   - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${CompanyName}-*'
                   - !Sub 'arn:aws:iam::${AWS::AccountId}:policy/promethium-*${CompanyName}*'
                   - !Sub 'arn:aws:iam::${AWS::AccountId}:policy/${CompanyName}-*'
+              # terraform destroy deletes the promethium-<env>-<co>-ie-tf-runner role,
+              # which requires listing + detaching its instance profiles before the
+              # role delete succeeds. This deploy role lacked those verbs, so a fresh
+              # destroy 403'd on iam:ListInstanceProfilesForRole (hand-patched via
+              # put-role-policy on the fcspin1 + iedemo1 teardowns). Codified here so
+              # destroy is symmetric with create.
+              - Sid: ModuleRoleInstanceProfileReads
+                Effect: Allow
+                Action:
+                  - iam:ListInstanceProfilesForRole
+                Resource:
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/promethium-*${CompanyName}*'
+              - Sid: ModuleRoleInstanceProfileMgmt
+                Effect: Allow
+                Action:
+                  - iam:RemoveRoleFromInstanceProfile
+                  - iam:DeleteInstanceProfile
+                Resource:
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:instance-profile/promethium-*${CompanyName}*'
         - PolicyName: iam-operational-role-trust-mgmt
           PolicyDocument:
             Version: '2012-10-17'
