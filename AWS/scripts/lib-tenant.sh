@@ -76,12 +76,35 @@ discover_jumpbox_sg_id() {
 clone_or_refresh_tenant_repo() {
   # $1 = company name (== branch name) ; $2 = target dir
   local company="$1" dir="$2"
+  local repo="https://github.com/promethium-ai/promethium-internal-ie-aws.git"
+  local tmpl="${TENANT_TEMPLATE_BRANCH:-template/agent-dev}"
+  local auth_repo="$repo"
+  [ -n "${GITHUB_TOKEN:-}" ] && auth_repo="https://x-access-token:${GITHUB_TOKEN}@github.com/promethium-ai/promethium-internal-ie-aws.git"
+
+  # Bootstrap: create the per-tenant branch from the template if it does not
+  # exist yet (a fresh tenant). The wrapper branch is generic — deploy.sh renders
+  # the per-tenant tfvars — so a branch off the template needs no edits. Keep the
+  # template (default template/agent-dev) re-synced whenever wrapper fixes land.
+  if ! git ls-remote --exit-code --heads "$repo" "$company" >/dev/null 2>&1; then
+    echo "  tenant branch '${company}' not found on origin — bootstrapping from '${tmpl}'" >&2
+    local btmp; btmp="$(mktemp -d)"
+    if ! git clone -q -b "$tmpl" --single-branch "$auth_repo" "$btmp" >&2; then
+      echo "  ERROR: could not clone template branch '${tmpl}' — create it or set TENANT_TEMPLATE_BRANCH" >&2
+      rm -rf "$btmp"; return 1
+    fi
+    if ! ( cd "$btmp" && git checkout -q -b "$company" && git push -q "$auth_repo" "$company" ) >&2; then
+      echo "  ERROR: could not push new tenant branch '${company}' — need a GITHUB_TOKEN with push, or create the branch by hand" >&2
+      rm -rf "$btmp"; return 1
+    fi
+    rm -rf "$btmp"
+    echo "  created origin/${company} from ${tmpl}" >&2
+  fi
+
   if [ -d "$dir/.git" ]; then
     echo "  ${dir} already present — refreshing branch '${company}'" >&2
     (cd "$dir" && git fetch origin "$company" && git checkout "$company" && git reset --hard "origin/${company}")
   else
-    git clone -b "$company" --single-branch \
-      "https://github.com/promethium-ai/promethium-internal-ie-aws.git" "$dir"
+    git clone -b "$company" --single-branch "$repo" "$dir"
   fi
 }
 
