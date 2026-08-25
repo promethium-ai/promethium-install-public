@@ -1,0 +1,849 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Promethium Intelligent Edge — Foundation stack for a customer-account install.
+  Creates ONLY the Terraform deploy/install role (+ instance profile) and the
+  Terraform state S3 bucket for one customer AWS account/company. Deploy this
+  stack once per customer AWS account/company before running Terraform.
+
+  The 8 EKS/OIDC operational roles (EBS/EFS CSI driver, LB controller, cluster
+  autoscaler, EKS cluster/worker, PG backup, Glue/Trino) and the TagResolver
+  custom resource used to tag them live in the SEPARATE operational_roles.yaml
+  stack — split out of what used to be one combined template so each rendered
+  template stays under CloudFormation's 51,200-byte inline (--template-file,
+  no S3 bucket) size limit. See AWS/scripts/prereqs.sh, which deploys
+  foundation.yaml then operational_roles.yaml (then, optionally, jumpbox.yaml)
+  in order. Terraform itself later patches the operational roles' OIDC trust
+  policies to the real cluster once it exists (see this role's
+  iam-operational-role-trust-mgmt inline policy, below).
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Core (Required)"
+        Parameters:
+          - CompanyName
+          - Environment
+      - Label:
+          default: "Deploy Role Configuration"
+        Parameters:
+          - PromethiumInstallRole
+    ParameterLabels:
+      CompanyName:
+        default: "Company Name"
+      Environment:
+        default: "Environment (dev/qa/preview/prod)"
+      PromethiumInstallRole:
+        default: "Promethium Terraform Deploy/Install Role Name"
+
+Parameters:
+  CompanyName:
+    Type: String
+    Description: Short company identifier (e.g. acme), lowercase, no spaces (recommended max 15 chars). Appended to all default role/policy names to avoid collisions when multiple Promethium tenants/environments share this AWS account. REQUIRED.
+
+  Environment:
+    Type: String
+    AllowedValues:
+      - dev
+      - qa
+      - preview
+      - prod
+    Description: >-
+      Deployment environment for this tenant. REQUIRED — no default, so a
+      stack can never silently provision prod-shaped names. Used throughout
+      the default role/policy names and the SecretsManager/registry resource
+      scoping below, and must equal the tenant's actual env: it drives the
+      Glue/Trino IRSA role name promethium-<Environment>-<CompanyName>-trino-oidc-role
+      that the umbrella's trino-sa ServiceAccount annotation expects.
+
+  PromethiumInstallRole:
+    Type: String
+    Default: ''
+    Description: >-
+      Custom name for the Terraform deploy/install role (optional — also the
+      name verifier_policy.yaml expects to attach to later). Leave blank to
+      use promethium-<Environment>-<CompanyName>-terraform-deploy-role.
+
+Mappings:
+  DefaultTags:
+    Values:
+      Product: Promethium
+      Owner: support@promethium.ai
+      createdBy: CloudFormation
+      Project: Intelligentedge
+  # Control-plane / hub account per environment — holds the SaaS-assume role the
+  # deploy role assumes for the tenant's DNS/ACM cert (cert_manager). ECR is
+  # always 734 regardless (see install-agent). Keyed by Environment.
+  HubAccount:
+    dev:     { Id: '734236616923' }
+    qa:      { Id: '734236616923' }
+    preview: { Id: '308611924187' }
+    prod:    { Id: '308611924187' }
+
+Conditions:
+  HasCustomInstallRoleName: !Not [!Equals [!Ref PromethiumInstallRole, '']]
+
+Resources:
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Terraform state bucket (single source — from tfstate-bootstrap.yaml)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  TfStateBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub 'promethium-tfstate-${AWS::AccountId}'
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256   # SSE-S3 (no KMS dependency for the deploy role)
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Company
+          Value: !Ref CompanyName
+        - Key: Product
+          Value: !FindInMap [DefaultTags, Values, Product]
+        - Key: Project
+          Value: !FindInMap [DefaultTags, Values, Project]
+
+  # Refuse any non-TLS access — the bucket holds terraform state AND the
+  # agent cert-bundle private key (_<co>-bundle/tls.key).
+  TfStateBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref TfStateBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !GetAtt TfStateBucket.Arn
+              - !Sub '${TfStateBucket.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Terraform deploy/install role — based on the WORKING hand-fork
+  # (promethium-terraform-deploy-role-A.yaml), not the stale install_role.yaml.
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  TerraformVPCNetworkPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub 'promethium-${Environment}-${CompanyName}-terraform-vpc-network-policy'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: VPCModifyResources
+            Effect: Allow
+            Action:
+              - ec2:CreateVpc
+              - ec2:DeleteVpc
+              - ec2:ModifyVpcAttribute
+              - ec2:EnableVpcClassicLink
+              - ec2:DisableVpcClassicLink
+              - ec2:EnableVpcClassicLinkDnsSupport
+            Resource: '*'
+          - Sid: SubnetModifyResources
+            Effect: Allow
+            Action:
+              - ec2:CreateSubnet
+              - ec2:DeleteSubnet
+              - ec2:ModifySubnetAttribute
+            Resource: '*'
+          - Sid: InternetAndNatGateway
+            Effect: Allow
+            Action:
+              - ec2:CreateInternetGateway
+              - ec2:DeleteInternetGateway
+              - ec2:AttachInternetGateway
+              - ec2:DetachInternetGateway
+              - ec2:CreateNatGateway
+              - ec2:DeleteNatGateway
+            Resource: '*'
+          - Sid: RouteTableActions
+            Effect: Allow
+            Action:
+              - ec2:CreateRouteTable
+              - ec2:DeleteRouteTable
+              - ec2:CreateRoute
+              - ec2:DeleteRoute
+              - ec2:AssociateRouteTable
+              - ec2:DisassociateRouteTable
+            Resource: '*'
+          - Sid: SecurityGroupActions
+            Effect: Allow
+            Action:
+              - ec2:CreateSecurityGroup
+              - ec2:DeleteSecurityGroup
+              - ec2:AuthorizeSecurityGroupIngress
+              - ec2:RevokeSecurityGroupIngress
+              - ec2:AuthorizeSecurityGroupEgress
+              - ec2:RevokeSecurityGroupEgress
+            Resource:
+              - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*'
+              - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:vpc/*'
+          - Sid: ElasticIPActions
+            Effect: Allow
+            Action:
+              - ec2:AllocateAddress
+              - ec2:ReleaseAddress
+              - ec2:AssociateAddress
+              - ec2:DisassociateAddress
+            Resource: !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:elastic-ip/*'
+          - Sid: VPCDescribeResources
+            Effect: Allow
+            Action:
+              - ec2:DescribeVpcs
+              - ec2:DescribeSubnets
+              - ec2:DescribeInternetGateways
+              - ec2:DescribeNatGateways
+              - ec2:DescribeRouteTables
+              - ec2:DescribeAddresses
+              - ec2:DescribeAddressesAttribute
+              - ec2:DescribeVpcAttribute
+              - ec2:DescribeVpcClassicLink
+              - ec2:DescribeVpcClassicLinkDnsSupport
+              - ec2:DescribeAvailabilityZones
+              - ec2:DescribeSecurityGroups
+            Resource: '*'
+
+  TerraformEC2Policy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub 'promethium-${Environment}-${CompanyName}-terraform-ec2-policy'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EC2CoreActions
+            Effect: Allow
+            Action:
+              - ec2:AttachVolume
+              - ec2:CreateLaunchTemplate
+              - ec2:CreateLaunchTemplateVersion
+              - ec2:DeleteLaunchTemplate
+              - ec2:CreateKeyPair
+              - ec2:DeleteKeyPair
+              - ec2:CreateVolume
+              - ec2:AttachNetworkInterface
+              - ec2:DetachNetworkInterface
+              - ec2:DeleteNetworkInterface
+              - ec2:ModifyInstanceAttribute
+              - ec2:RunInstances
+              - ec2:TerminateInstances
+              - ec2:DetachVolume
+              - ec2:CreateNetworkInterface
+            Resource:
+              - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*'
+              - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:launch-template/*'
+              - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:key-pair/*'
+              - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:volume/*'
+              - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*'
+              - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*'
+              - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:subnet/*'
+              - !Sub 'arn:aws:ec2:${AWS::Region}::image/*'
+          - Sid: EC2DescribeActions
+            Effect: Allow
+            Action:
+              - ec2:DescribeInstances
+              - ec2:DescribeInstanceStatus
+              - ec2:DescribeInstanceAttribute
+              - ec2:DescribeInstanceTypes
+              - ec2:DescribeIamInstanceProfileAssociations
+              - ec2:DescribeInstanceCreditSpecifications
+              - ec2:DescribeVolumes
+              - ec2:DescribeVolumesModifications
+              - ec2:DescribeKeyPairs
+              - ec2:DescribeLaunchTemplates
+              - ec2:DescribeLaunchTemplateVersions
+              - ec2:DescribeImages
+              - ec2:DescribeNetworkInterfaces
+              - ec2:DescribeTags
+            Resource: '*'
+          - Sid: EC2Tagging
+            Effect: Allow
+            Action:
+              - ec2:CreateTags
+              - ec2:DeleteTags
+            Resource: '*'
+          - Sid: SSMParameter
+            Effect: Allow
+            Action:
+              - ssm:GetParameter
+            Resource: !Sub 'arn:aws:ssm:${AWS::Region}::parameter/aws/service/eks/optimized-ami/*/amazon-linux-*/recommended/release_version'
+
+  TerraformEKSPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub 'promethium-${Environment}-${CompanyName}-terraform-eks-policy'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EKSPermissions
+            Effect: Allow
+            Action:
+              - eks:UpdateClusterVersion
+              - eks:ListNodegroups
+              - eks:UntagResource
+              - eks:ListTagsForResource
+              - eks:UpdateClusterConfig
+              - eks:CreateNodegroup
+              - eks:DeleteCluster
+              - eks:CreateFargateProfile
+              - eks:UpdateNodegroupVersion
+              - eks:ListFargateProfiles
+              - eks:DescribeNodegroup
+              - eks:ListUpdates
+              - eks:DeleteNodegroup
+              - eks:DescribeUpdate
+              - eks:TagResource
+              - eks:UpdateNodegroupConfig
+              - eks:DescribeCluster
+              - eks-auth:AssumeRoleForPodIdentity
+              - iam:PassRole
+              - iam:GetRole
+              - iam:ListAttachedRolePolicies
+            Resource:
+              # NOTE (fixed during merge): the hand-fork scoped this to
+              # role/${EnvironmentName}-eks-cluster-role /-worker-role, which
+              # does not match the actual operational-role names this same
+              # template produces (promethium-${Environment}-${CompanyName}-eks-*-role,
+              # see rule 3). Corrected to reference the real names below —
+              # see foundation-review.md.
+              - !Sub 'arn:aws:eks:${AWS::Region}:${AWS::AccountId}:cluster/promethium*'
+              - !Sub 'arn:aws:eks:${AWS::Region}:${AWS::AccountId}:nodegroup/promethium*/*/*'
+              - !Sub 'arn:aws:iam::${AWS::AccountId}:role/promethium-${Environment}-${CompanyName}-eks-cluster-role'
+              - !Sub 'arn:aws:iam::${AWS::AccountId}:role/promethium-${Environment}-${CompanyName}-eks-worker-role'
+          - Sid: EKSCreatePermissions
+            Effect: Allow
+            Action:
+              - eks:ListClusters
+              - eks:CreateCluster
+            Resource: !Sub 'arn:aws:eks:${AWS::Region}:${AWS::AccountId}:cluster/*'
+          - Sid: IAMServiceLinkedRole
+            Effect: Allow
+            Action:
+              - iam:CreateServiceLinkedRole
+              - iam:DeleteServiceLinkedRole
+            # NOTE: iam:GetRole was here too, gated on iam:AWSServiceName — but that
+            # condition key is only populated for CreateServiceLinkedRole/
+            # DeleteServiceLinkedRole calls, never for a plain GetRole, so the grant
+            # was dead. EKS CreateNodegroup does an UNCONDITIONED GetRole on the SLR
+            # (AWSServiceRoleForAmazonEKSNodegroup) to check existence; that is
+            # covered by the aws-service-role/* resource on IAMGetRoleForEKS below.
+            Resource: '*'
+            Condition:
+              StringEquals:
+                iam:AWSServiceName:
+                  - eks.amazonaws.com
+                  - glue.amazonaws.com
+                  - eks-nodegroup.amazonaws.com
+                  - eks-addons.amazonaws.com
+          - Sid: IAMGetRoleForEKS
+            Effect: Allow
+            Action: iam:GetRole
+            Resource:
+              - !Sub 'arn:aws:iam::${AWS::AccountId}:role/promethium-*'
+              # EKS CreateNodegroup/CreateCluster GetRole the service-linked roles
+              # (eks-nodegroup/eks/eks-addons) to validate they exist. Read-only on
+              # AWS-managed SLRs, in-account only.
+              - !Sub 'arn:aws:iam::${AWS::AccountId}:role/aws-service-role/*'
+          - Sid: OIDCProviderManagement
+            Effect: Allow
+            Action:
+              - iam:CreateOpenIDConnectProvider
+              - iam:TagOpenIDConnectProvider
+              - iam:GetOpenIDConnectProvider
+              - iam:DeleteOpenIDConnectProvider
+            Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:oidc-provider/*'
+
+  TerraformS3Policy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub 'promethium-${Environment}-${CompanyName}-terraform-s3-policy'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: KMSKeyManagement
+            Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:Encrypt
+              - kms:GenerateDataKey
+              - kms:DescribeKey
+              - kms:ReEncrypt*
+            Resource: !Sub 'arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*'
+          - Sid: KMSKeyOperations
+            Effect: Allow
+            Action:
+              - kms:EnableKeyRotation
+              - kms:EnableKey
+              - kms:Decrypt
+              - kms:ListKeyPolicies
+              - kms:UntagResource
+              - kms:PutKeyPolicy
+              - kms:GetKeyPolicy
+              - kms:Verify
+              - kms:ListResourceTags
+              - kms:DisableKey
+              - kms:DisableKeyRotation
+              - kms:TagResource
+              - kms:Encrypt
+              - kms:GetKeyRotationStatus
+              - kms:ScheduleKeyDeletion
+              - kms:CreateAlias
+              - kms:DescribeKey
+              - kms:Sign
+              - kms:DeleteAlias
+            Resource:
+              - !Sub 'arn:aws:kms:${AWS::Region}:${AWS::AccountId}:alias/*'
+              - !Sub 'arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*'
+          - Sid: S3BucketManagement
+            Effect: Allow
+            Action:
+              - s3:CreateBucket
+              - s3:ListBucket
+              - s3:GetBucketLocation
+              - s3:DeleteBucket
+            Resource:
+              - arn:aws:s3:::*-trino-*
+              - arn:aws:s3:::*-postgres-backups-*
+          - Sid: S3BucketConfiguration
+            Effect: Allow
+            Action:
+              - s3:PutEncryptionConfiguration
+              - s3:GetEncryptionConfiguration
+              - s3:GetLifecycleConfiguration
+              - s3:GetBucketTagging
+              - s3:PutBucketTagging
+              - s3:PutLifecycleConfiguration
+              - s3:PutBucketPolicy
+              - s3:GetBucketVersioning
+              - s3:DeleteBucketPolicy
+              - s3:GetBucketPolicy
+              - s3:PutBucketVersioning
+            Resource:
+              - arn:aws:s3:::*-trino-*
+              - arn:aws:s3:::*-postgres-backups-*
+          - Sid: S3BucketRead
+            Effect: Allow
+            Action:
+              - s3:GetAccelerateConfiguration
+              - s3:GetBucket*
+              - s3:GetReplicationConfiguration
+            Resource:
+              - arn:aws:s3:::*-trino-*
+              - arn:aws:s3:::*-postgres-backups-*
+          - Sid: S3ListOperations
+            Effect: Allow
+            Action: s3:List*
+            Resource:
+              - arn:aws:s3:::*-trino-*
+              - arn:aws:s3:::*-postgres-backups-*
+          - Sid: KMSCreateOperations
+            Effect: Allow
+            Action:
+              - kms:CreateKey
+              - kms:ListAliases
+            Resource: '*'
+
+  TerraformEFSPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub 'promethium-${Environment}-${CompanyName}-terraform-efs-policy'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EFSPermissions
+            Effect: Allow
+            Action:
+              - elasticfilesystem:ModifyMountTargetSecurityGroups
+              - elasticfilesystem:DescribeMountTargets
+              - elasticfilesystem:UntagResource
+              - elasticfilesystem:CreateMountTarget
+              - elasticfilesystem:DescribeLifecycleConfiguration
+              - elasticfilesystem:DescribeAccessPoints
+              - elasticfilesystem:DescribeFileSystems
+              - elasticfilesystem:DeleteMountTarget
+              - elasticfilesystem:DeleteFileSystem
+              - elasticfilesystem:DescribeMountTargetSecurityGroups
+              - elasticfilesystem:TagResource
+            Resource:
+              - !Sub 'arn:aws:elasticfilesystem:${AWS::Region}:${AWS::AccountId}:access-point/*'
+              - !Sub 'arn:aws:elasticfilesystem:${AWS::Region}:${AWS::AccountId}:file-system/*'
+          - Sid: EFSCreatePermissions
+            Effect: Allow
+            Action: elasticfilesystem:CreateFileSystem
+            Resource: '*'
+
+  TerraformELBPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub 'promethium-${Environment}-${CompanyName}-terraform-elb-policy'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: VisualEditor0
+            Effect: Allow
+            Action:
+              - elasticloadbalancing:DescribeLoadBalancerAttributes
+              - elasticloadbalancing:DescribeLoadBalancers
+              - elasticloadbalancing:DescribeTags
+            Resource: '*'
+
+  TerraformACMPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub 'promethium-${Environment}-${CompanyName}-terraform-acm-policy'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: ACMCertGetPermissions
+            Effect: Allow
+            Action:
+              - acm:RequestCertificate
+              - acm:ListCertificates
+              - acm:GetCertificate
+            Resource: '*'
+          - Sid: ACMCertCreatePermissions
+            Effect: Allow
+            Action:
+              - acm:DeleteCertificate
+              - acm:DescribeCertificate
+              - acm:AddTagsToCertificate
+              - acm:ListTagsForCertificate
+            Resource: !Sub 'arn:aws:acm:${AWS::Region}:${AWS::AccountId}:certificate/*'
+
+  TerraformGluePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub 'promethium-${Environment}-${CompanyName}-terraform-glue-policy'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: GlueDatabaseManagement
+            Effect: Allow
+            Action:
+              - glue:CreateDatabase
+              - glue:DeleteDatabase
+              - glue:UpdateDatabase
+              - glue:GetDatabase
+              - glue:GetDatabases
+            Resource:
+              - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:database/*_trino'
+              - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:database/*_trino*/*'
+              - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/*trino*/*'
+              - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:userDefinedFunction/*trino*/*'
+              - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:catalog'
+          - Sid: GlueCatalogAccess
+            Effect: Allow
+            Action:
+              - glue:GetTags
+              - glue:TagResource
+            Resource:
+              - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:catalog'
+              - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:database/*_trino'
+          - Sid: GlueReadOnlyAccess
+            Effect: Allow
+            Action:
+              - glue:GetDatabase
+              - glue:GetDatabases
+            Resource: '*'
+
+  TerraformInstallRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !If
+        - HasCustomInstallRoleName
+        - !Ref PromethiumInstallRole
+        - !Sub 'promethium-${Environment}-${CompanyName}-terraform-deploy-role'
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # Jumpbox EC2 instance profile trust (base install_role.yaml model —
+          # the hand-fork used a human OperatorPrincipalArn instead since it
+          # was tested "local-as-customer"; we keep the jumpbox/instance-profile
+          # model here per the merge brief, so the instance profile is preserved
+          # below and this is a service-principal trust, not a human principal).
+          - Sid: EC2InstanceProfileTrust
+            Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+          # Self-assume: Terraform's AWS provider chain-assumes this same role
+          # from the jumpbox (see terraform_assume_role_arn in tfvars). The
+          # principal MUST be the account root, not the role's own ARN — at
+          # stack-create the role doesn't exist yet, so naming it as a principal
+          # makes IAM reject the trust policy ("Invalid principal in policy").
+          # The aws:PrincipalArn condition scopes it back to ONLY this role, so
+          # it's still self-assume-only, and it's valid at create (no manual
+          # post-deploy update-assume-role-policy needed).
+          - Sid: SelfAssumeForProviderChaining
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:PrincipalArn: !If
+                  - HasCustomInstallRoleName
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${PromethiumInstallRole}'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/promethium-${Environment}-${CompanyName}-terraform-deploy-role'
+      ManagedPolicyArns:
+        # Restored vs. the hand-fork: the jumpbox security group (jumpbox.yaml)
+        # opens NO inbound ports at all (only outbound 443/80) — SSM Session
+        # Manager is the only way to reach the instance, so this is required,
+        # not optional, once we're back on the jumpbox/instance-profile model.
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - !Ref TerraformVPCNetworkPolicy
+        - !Ref TerraformEC2Policy
+        - !Ref TerraformEKSPolicy
+        - !Ref TerraformS3Policy
+        - !Ref TerraformEFSPolicy
+        - !Ref TerraformELBPolicy
+        - !Ref TerraformACMPolicy
+        - !Ref TerraformGluePolicy
+      Policies:
+        # deploy.sh (running as this role on the jumpbox) reads the network /
+        # foundation / operational-roles stack Outputs to render terraform.tfvars.
+        - PolicyName: cloudformation-read-prereqs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: CloudFormationReadPrereqs
+                Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
+                Resource: !Sub 'arn:aws:cloudformation:*:${AWS::AccountId}:stack/promethium-*'
+        - PolicyName: registry-invoke
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: RegistryInvoke
+                Effect: Allow
+                Action: execute-api:Invoke
+                Resource: 'arn:aws:execute-api:*:*:ol77z8v5j2/*'
+        - PolicyName: gitops-secret-bundles
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: SecretsManagerBundles   # tightened from the hand-fork's secretsmanager:* wildcard — see foundation-review.md
+                Effect: Allow
+                Action:
+                  - secretsmanager:CreateSecret
+                  - secretsmanager:PutSecretValue
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:TagResource
+                  - secretsmanager:UntagResource
+                  - secretsmanager:DeleteSecret
+                  - secretsmanager:GetResourcePolicy
+                  - secretsmanager:PutResourcePolicy
+                Resource: !Sub 'arn:aws:secretsmanager:*:*:secret:${Environment}/ie/${CompanyName}/*'
+              - Sid: SecretsManagerAccountLevel   # ListSecrets/GetRandomPassword do not support resource-level scoping
+                Effect: Allow
+                Action:
+                  - secretsmanager:ListSecrets
+                  - secretsmanager:GetRandomPassword
+                Resource: "*"
+        - PolicyName: tfstate-bucket
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: StateObjectOps
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:GetObjectVersion
+                  - s3:DeleteObjectVersion
+                Resource: !Sub 'arn:aws:s3:::promethium-tfstate-${AWS::AccountId}/*'
+              - Sid: StateBucketOps
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:ListBucketVersions
+                  - s3:GetBucketLocation
+                  - s3:GetBucketVersioning
+                Resource: !Sub 'arn:aws:s3:::promethium-tfstate-${AWS::AccountId}'
+        - PolicyName: iam-module-roles
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # The promethium module creates its own IAM roles inline (argocd_bootstrap
+              # ie_tf_runner + eso, ecr-refresher, etc.). Scoped to the promethium-*/
+              # ${CompanyName}-* namespaces — NOT account-wide. End-state is module-side
+              # BYO support (no customer iam:CreateRole); carried over from the hand-fork.
+              - Sid: ModuleRoleMgmt
+                Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:CreatePolicy
+                  - iam:DeletePolicy
+                  - iam:CreatePolicyVersion
+                  - iam:DeletePolicyVersion
+                  - iam:GetRole
+                  - iam:GetRolePolicy
+                  - iam:GetPolicy
+                  - iam:GetPolicyVersion
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                  - iam:ListPolicyVersions
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:TagPolicy
+                  - iam:PassRole
+                  - iam:CreateServiceLinkedRole
+                Resource:
+                  # Scoped to this tenant (company appears in every role/policy this
+                  # deploy role creates: promethium-<env>-<co>-*, promethium-ie-*-<env>-<co>).
+                  # NOT account-wide promethium-* — that would let one tenant's deploy
+                  # role manage another tenant's roles in a shared account.
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/promethium-*${CompanyName}*'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${CompanyName}-*'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:policy/promethium-*${CompanyName}*'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:policy/${CompanyName}-*'
+              # terraform destroy deletes the promethium-<env>-<co>-ie-tf-runner role,
+              # which requires listing + detaching its instance profiles before the
+              # role delete succeeds. This deploy role lacked those verbs, so a fresh
+              # destroy 403'd on iam:ListInstanceProfilesForRole (hand-patched via
+              # put-role-policy on the fcspin1 + iedemo1 teardowns). Codified here so
+              # destroy is symmetric with create.
+              - Sid: ModuleRoleInstanceProfileReads
+                Effect: Allow
+                Action:
+                  - iam:ListInstanceProfilesForRole
+                Resource:
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/promethium-*${CompanyName}*'
+              - Sid: ModuleRoleInstanceProfileMgmt
+                Effect: Allow
+                Action:
+                  - iam:RemoveRoleFromInstanceProfile
+                  - iam:DeleteInstanceProfile
+                Resource:
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:instance-profile/promethium-*${CompanyName}*'
+        - PolicyName: iam-operational-role-trust-mgmt
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # New per merge rule 2: TF's modify_iam_oidc_role_trust_policy reads
+              # and updates the 8 operational roles' trust policies post-cluster
+              # (they're created by the separate operational_roles.yaml stack with
+              # a dummy OIDCProviderUrl and need to be patched to the real OIDC
+              # provider once the cluster exists).
+              - Sid: OperationalRoleTrustAndPassRole
+                Effect: Allow
+                Action:
+                  - iam:GetRole
+                  - iam:GetRolePolicy
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                  - iam:UpdateAssumeRolePolicy
+                  - iam:PassRole
+                Resource:
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/promethium-*-${CompanyName}*'
+        - PolicyName: self-assume-chain
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Completes the self-assume trust statement above: the trust
+              # policy alone only says WHO may assume this role. The caller
+              # (this same role, running on the jumpbox via the instance
+              # profile) also needs an identity-policy grant allowing IT to
+              # call sts:AssumeRole against this role's own ARN. Not one of
+              # rule 2's 4 named permission bullets — added because the trust
+              # policy's self-assume statement is non-functional without it;
+              # see foundation-review.md.
+              - Sid: SelfAssumeIdentityGrant
+                Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !If
+                  - HasCustomInstallRoleName
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${PromethiumInstallRole}'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/promethium-${Environment}-${CompanyName}-terraform-deploy-role'
+        - PolicyName: assume-hub-saas-role
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # cert_manager's AWS provider assumes the hub-account SaaS role to
+              # manage the tenant's public DNS + ACM cert (Route53/cert live in the
+              # Promethium hub account: 734 dev/qa, 308 preview/prod). Cross-account
+              # AssumeRole needs BOTH sides — this identity grant AND the hub
+              # saas-role trust listing this deploy role. Without it the apply dies
+              # at module.aws.module.certificate_manager
+              # "IAM Role ...:role/promethium-terraform-saas-assume-role cannot be assumed".
+              # NOTE: goes away when DNS/cert move hub-side (S2 — customer TF assumes
+              # ZERO Promethium roles). Baked now because S2 isn't shipped yet.
+              - Sid: AssumeHubSaasRole
+                Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Sub
+                  - 'arn:aws:iam::${HubAcct}:role/promethium-terraform-saas-assume-role'
+                  - HubAcct: !FindInMap [HubAccount, !Ref Environment, Id]
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Company
+          Value: !Ref CompanyName
+        - Key: Product
+          Value: !FindInMap [DefaultTags, Values, Product]
+        - Key: Owner
+          Value: !FindInMap [DefaultTags, Values, Owner]
+        - Key: createdBy
+          Value: !FindInMap [DefaultTags, Values, createdBy]
+        - Key: Project
+          Value: !FindInMap [DefaultTags, Values, Project]
+
+  TerraformInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub '${TerraformInstallRole}-instance-profile'
+      Path: /
+      Roles:
+        - !Ref TerraformInstallRole
+
+Outputs:
+  DeployRoleArn:
+    Description: ARN of the Terraform deploy/install role — set terraform_assume_role_arn to this.
+    Value: !GetAtt TerraformInstallRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-DeployRoleArn'
+
+  InstanceProfileArn:
+    Description: ARN of the jumpbox instance profile
+    Value: !GetAtt TerraformInstanceProfile.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-InstanceProfileArn'
+
+  InstanceProfileName:
+    Description: Name of the jumpbox instance profile — pass as UseExistingInstanceProfile to jumpbox.yaml
+    Value: !Ref TerraformInstanceProfile
+    Export:
+      Name: !Sub '${AWS::StackName}-InstanceProfileName'
+
+  TfStateBucket:
+    Description: Terraform state S3 bucket (S3-native locking; no DynamoDB)
+    Value: !Ref TfStateBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-TfStateBucket'

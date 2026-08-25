@@ -1,0 +1,128 @@
+# Model A' — ECR → ArgoCD OCI credential refresher (spoke-side).
+#
+# WHY: the agent spoke pulls the intelligent-edge umbrella as an OCI Helm chart
+# from ECR (review §10a / hub-git-mirror-design.md — replaces the GitHub git
+# source, so the spoke holds NO GitHub PAT). ArgoCD's repo-server needs a
+# `repository` secret to `helm pull oci://…ecr…`, but ECR auth tokens expire in
+# ~12h. This CronJob (SA auth = IRSA, NOT a GitHub cred) mints a fresh token and
+# writes it into the Argo `repository` secret every 6h; onboard-agent triggers a
+# one-shot run immediately at onboarding so the secret exists before first sync.
+#
+# envsubst vars (set by onboard-agent): ECR_REFRESHER_ROLE_ARN, ECR_REGION
+# (us-west-1 — the ECR region, NOT the workflow's us-east-1 hub region),
+# ECR_REGISTRY (734236616923.dkr.ecr.us-west-1.amazonaws.com), CHART_NS (charts).
+#
+# PREREQ (tf / operator, creds-gated): an IRSA role ECR_REFRESHER_ROLE_ARN in the
+# tenant account trusting the spoke's OIDC provider + this SA
+# (argocd/argocd-ecr-cred-refresher), with:
+#   ecr:GetAuthorizationToken            (resource *)
+#   ecr:BatchGetImage, GetDownloadUrlForLayer, BatchCheckLayerAvailability
+#                                        (resource charts/intelligent-edge)
+# Add it to the promethium module's argocd_bootstrap IRSA set.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: argocd-ecr-cred-refresher
+  namespace: argocd
+  annotations:
+    eks.amazonaws.com/role-arn: "${ECR_REFRESHER_ROLE_ARN}"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: argocd-ecr-cred-refresher
+  namespace: argocd
+rules:
+  # Write ONLY the one OCI repository secret (name-scoped where the API allows;
+  # create needs the collection verb, so create is unrestricted-by-name but the
+  # SA can do nothing else).
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["ie-ecr-oci"]
+    verbs: ["get", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: argocd-ecr-cred-refresher
+  namespace: argocd
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: argocd-ecr-cred-refresher
+subjects:
+  - kind: ServiceAccount
+    name: argocd-ecr-cred-refresher
+    namespace: argocd
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: argocd-ecr-cred-refresh
+  namespace: argocd
+spec:
+  schedule: "0 */6 * * *"        # every 6h; ECR token TTL ~12h → 2x margin
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          serviceAccountName: argocd-ecr-cred-refresher
+          restartPolicy: Never
+          containers:
+            - name: refresh
+              # alpine/k8s bundles aws-cli + kubectl (no bespoke image to build).
+              image: alpine/k8s:1.30.2
+              env:
+                - name: ECR_REGION
+                  value: "${ECR_REGION}"
+                - name: ECR_REGISTRY
+                  value: "${ECR_REGISTRY}"
+                - name: CHART_NS
+                  value: "${CHART_NS}"
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  # Retry until the ECR token is non-empty: at onboard the IRSA role
+                  # was just created by tf, and assume-role-with-web-identity can lag a
+                  # minute or two. Without this, get-login-password returns empty, the
+                  # empty command-substitution slips past set -e, and we write a secret
+                  # with an EMPTY password -> Argo OCI pull fails "basic credential not
+                  # found" (ocipilot + cleanoci1/2 2026-08-05). Guard: never write an
+                  # empty-password secret.
+                  TOKEN=""
+                  for i in $(seq 1 30); do
+                    TOKEN="$(aws ecr get-login-password --region "$ECR_REGION" 2>/dev/null || true)"
+                    [ -n "$TOKEN" ] && break
+                    echo "ECR token empty (IRSA not ready yet?), retry $i/30..."
+                    sleep 10
+                  done
+                  if [ -z "$TOKEN" ]; then
+                    echo "ERROR: empty ECR token after retries — IRSA role not assumable / ECR perms missing"
+                    exit 1
+                  fi
+                  cat <<EOF | kubectl apply -f -
+                  apiVersion: v1
+                  kind: Secret
+                  metadata:
+                    name: ie-ecr-oci
+                    namespace: argocd
+                    labels:
+                      argocd.argoproj.io/secret-type: repo-creds
+                  type: Opaque
+                  stringData:
+                    type: helm
+                    enableOCI: "true"
+                    url: ${ECR_REGISTRY}
+                    username: AWS
+                    password: "$TOKEN"
+                  EOF
+                  echo "refreshed ie-ecr-oci (repo-creds) for host ${ECR_REGISTRY}"
