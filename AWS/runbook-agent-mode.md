@@ -9,7 +9,7 @@ intelligent-edge OCI umbrella pulled from the Promethium ECR (734, us-west-1).
   roles, tfstate bucket, jumpbox. Example test account: `646322277713` (qa-sandbox, reused for spins).
 - **Hub / control-plane** — `734236616923` (dev/qa) or `308611924187` (preview/prod): argocd-agent
   principal, SaaS/DNS roles, and **the ECR registry (ALWAYS 734, us-west-1)**.
-- Agent principal DNS: `argocdagent.<env>.promethium.ai:443` (task #13 will rename to `argocd-hub.<env>`).
+- Agent principal DNS: `argocd-hub.<env>.promethium.ai:443` (task #13 rename from `argocdagent.<env>`; dev cut over).
 
 ## Cross-account boundary (why agent enroll is a 3-part split — by design, not a bug)
 - The customer can reach only their own account + the hub agent endpoint. They **cannot** touch the hub cluster.
@@ -59,7 +59,7 @@ secret. Use `--skip-agent` to stop after infra.
   waits for the hub cert-manager secret `<co>-agent-client-tls`).
 - **Part B (bridge):** `aws s3 cp --recursive /tmp/bundle-<co> s3://<tfstate-bucket>/_<co>-bundle/`.
 - **Part C (customer jumpbox):** pull the bundle, then `AWS/agent/install-agent.sh --config <env-file>
-  --bundle <dir> --context <spoke>` (env-file: TENANT, PRINCIPAL_ADDRESS=argocdagent.<env>.promethium.ai,
+  --bundle <dir> --context <spoke>` (env-file: TENANT, PRINCIPAL_ADDRESS=argocd-hub.<env>.promethium.ai,
   PORT=443, UMBRELLA_SOURCE=oci, ECR_REFRESHER_ROLE_ARN=…-argocd-ecr-refresher, ECR_REGION=us-west-1,
   ECR_REGISTRY=734236616923.dkr.ecr.us-west-1.amazonaws.com, CHART_NS=charts).
 

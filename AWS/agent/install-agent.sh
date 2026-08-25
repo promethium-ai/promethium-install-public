@@ -50,7 +50,7 @@ kc(){ if [ -n "$KUBE_CONTEXT" ]; then kubectl --context "$KUBE_CONTEXT" "$@"; el
 set -a; . "$CONFIG"; set +a
 
 : "${TENANT:?set TENANT in the config (your tenant name)}"
-: "${PRINCIPAL_ADDRESS:?set PRINCIPAL_ADDRESS (e.g. argocdagent.dev.promethium.ai)}"
+: "${PRINCIPAL_ADDRESS:?set PRINCIPAL_ADDRESS (e.g. argocd-hub.dev.promethium.ai)}"
 : "${PRINCIPAL_PORT:=443}"
 : "${ARGOCD_AGENT_REF:=v0.9.0}"
 : "${UMBRELLA_SOURCE:=oci}"

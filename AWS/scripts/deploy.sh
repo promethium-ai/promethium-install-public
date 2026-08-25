@@ -48,8 +48,8 @@
 #   --jumpbox-sg-id SG               default: self-discovered via IMDSv2
 #   --hub-profile PROFILE            AWS CLI profile for Promethium hub-side
 #                                     steps (cert issuance). See README.
-#   --agent-server-addr HOST:PORT    default: argocdagent.<environment>.promethium.ai:443
-#                                     (argocd-hub.<env> after task #13's PKI cutover)
+#   --agent-server-addr HOST:PORT    default: argocd-hub.<environment>.promethium.ai:443
+#                                     (task #13 rename from argocdagent.<env>)
 #   --argocd-agent-ref REF           default: v0.9.0
 #   --workdir DIR                    default: current directory
 #   --skip-agent                     stop after Terraform apply (infra only)
@@ -117,11 +117,11 @@ require_tools
 
 [ -n "$AWS_REGION" ] || AWS_REGION="$(aws configure get region 2>/dev/null || true)"
 AWS_REGION="${AWS_REGION:-us-east-1}"
-# Live hub cert SAN is argocdagent.<env> — the argocdagent->argocd-hub rename
-# (task #13) is NOT cut over yet, so this must stay argocdagent.<env> or the
-# agent mTLS fails on a SAN mismatch. Flip to argocd-hub.<env> once the hub PKI
-# is reissued. Override anytime with --agent-server-addr.
-[ -n "$AGENT_SERVER_ADDR" ] || AGENT_SERVER_ADDR="argocdagent.${ENVIRONMENT}.promethium.ai:443"
+# Live hub cert SAN is argocd-hub.<env> (task #13 rename from argocdagent.<env>;
+# confirmed cut over for dev). If qa/preview/prod haven't had their hub PKI/DNS
+# cut over yet, the agent mTLS will fail there on a SAN mismatch — override with
+# --agent-server-addr until that env is cut over.
+[ -n "$AGENT_SERVER_ADDR" ] || AGENT_SERVER_ADDR="argocd-hub.${ENVIRONMENT}.promethium.ai:443"
 [ -n "$TENANT_REGISTRY_API_URL" ] || TENANT_REGISTRY_API_URL="https://ol77z8v5j2.execute-api.us-east-1.amazonaws.com/${ENVIRONMENT}/onboarding/registry/tenants"
 
 NETWORK_STACK="promethium-network-${COMPANY_NAME}"
