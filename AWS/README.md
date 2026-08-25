@@ -2,11 +2,14 @@
 
 ![Promethium Intelligent Edge (AWS)](../images/AWS_IE.png)
 
-This page documents instructions for the customer on how to setup prerequisites for a secure Promethium IE on AWS. The full deployment is an Elastic Kubernetes Service (EKS) cluster within which the Promethium application services are deployed, fronted by an internal Application Load Balancer (ALB).
+This page documents instructions for the customer on how to install a secure Promethium Intelligent Edge (IE) on AWS. The full deployment is an Elastic Kubernetes Service (EKS) cluster within which the Promethium application services are deployed, fronted by an internal Application Load Balancer (ALB).
+
+There are two documented ways to install — see [Install paths](#install-paths) below. **New installs should use the self-serve scripted install (Model A′ / argocd-agent)**; the original manual, CFT-by-CFT / on-call Terraform flow is kept further down as a clearly labeled reference.
 
 - [Promethium Intelligent Edge AWS Installation (Customer)](#promethium-intelligent-edge-aws-installation-customer)
-- [Overview](#overview)
-    - [How it works](#how-it-works)
+- [Install paths](#install-paths)
+- [Quick start (scripted A′)](#quick-start-scripted-a)
+- [Prerequisites](#prerequisites)
     - [Environment Prerequisites](#environment-prerequisites)
     - [VPC and Subnet Requirements](#vpc-and-subnet-requirements)
     - [Example layout for a `10.0.0.0/22` VPC (recommended — 3 private subnets + 1 public)](#example-layout-for-a-1000022-vpc-recommended--3-private-subnets--1-public)
@@ -14,7 +17,12 @@ This page documents instructions for the customer on how to setup prerequisites 
     - [Networking Requirements](#networking-requirements)
       - [Install VM - Outbound Access](#install-vm---outbound-access)
       - [EKS Nodes - Outbound Access](#eks-nodes---outbound-access)
-- [Setup Customer Prerequisites](#setup-customer-prerequisites)
+- [Customer Information Required by Promethium](#customer-information-required-by-promethium)
+  - [AWS Environment](#aws-environment)
+  - [VPC and Subnets](#vpc-and-subnets)
+  - [Install VM](#install-vm)
+  - [Provided by Promethium](#provided-by-promethium)
+- [Reference: manual (non-agent) install](#reference-manual-non-agent-install)
   - [1. IAM Install Roles](#1-iam-install-roles)
   - [2. VPC subnet](#2-vpc-subnet)
     - [2.a Option A — Create VPC with Promethium Network CFT](#2a-option-a--create-vpc-with-promethium-network-cft)
@@ -30,28 +38,86 @@ This page documents instructions for the customer on how to setup prerequisites 
   - [5. Verification](#5-verification)
     - [5.1 Verifier Permissions (required before running verifier scripts)](#51-verifier-permissions-required-before-running-verifier-scripts)
     - [5.2 Verifier Script](#52-verifier-script)
-  - [6. Customer Information Required by Promethium](#6-customer-information-required-by-promethium)
-    - [AWS Environment](#aws-environment)
-    - [VPC and Subnets](#vpc-and-subnets)
-    - [Install VM](#install-vm)
-    - [Provided by Promethium](#provided-by-promethium)
-  - [7. Resources](#7-resources)
+- [Resources](#resources)
 
 ---
-# Overview
 
-### How it works
+# Install paths
 
-Installing a Promethium Intelligent Edge (IE) cluster involves two parties across three sequential steps:
-- The customer will first provide prerequisite AWS infrastructure (by following this page) - VPC, subnets, install VM, install role, and operational IAM roles, etc.
-- The Promethium associate will then complete pre-call setup — creating and configuring the customer's Terraform branch ([aws-install-pre-call.md](aws-install-pre-call.md)).
-- The customer will then deploy the EKS cluster with Terraform, configure OIDC trust policies, and install the full Promethium application stack — on-call with the Promethium associate.
+Promethium IE on AWS can be installed two ways:
 
-Promethium is always deployed with an **internal load balancer** — accessible via VPN only.
+- **Recommended — self-serve scripted install (Model A′ / argocd-agent).**
+  Two wrapper scripts collapse the customer-account install to two commands
+  (plus a 3-part agent enrollment), and teardown to one. The spoke
+  `argocd-agent` dials **out** to the Promethium hub — Promethium never holds
+  a credential to your cluster, and nothing is exposed inbound. Start with
+  [Quick start](#quick-start-scripted-a) below, then go as deep as you need:
+  - [AWS/scripts/README.md](scripts/README.md) — the wrapper scripts
+    (`prereqs.sh` / `deploy.sh` / `destroy.sh`) in full detail
+  - [AWS/runbook-agent-mode.md](runbook-agent-mode.md) — the full runbook:
+    accounts/topology, prerequisites, install, the 3-part agent enrollment,
+    validation, teardown, and troubleshooting
+  - [AWS/agent/README.md](agent/README.md) — the spoke agent installer
+    (`install-agent.sh`) used during agent enrollment
+- **Reference — manual (non-agent) install.** The original CFT-by-CFT /
+  hand-run Terraform flow, kept below at
+  [Reference: manual (non-agent) install](#reference-manual-non-agent-install)
+  for customers/paths not yet on Model A′. The scripted flow above supersedes
+  it for new installs.
 
-Once the customer has provided the prerequisite infrastructure and variables, the customer will follow the [AWS Install Guide](aws-install.md) on-call with the Promethium associate.
+Both paths share the same customer-side environment/network prerequisites —
+see [Prerequisites](#prerequisites) below.
 
 ---
+
+# Quick start (scripted A′)
+
+On a jumpbox (or an equivalent host) with your AWS account's credentials
+active, and — once the cluster exists — private network reach to its API:
+
+```bash
+# 1. CloudFormation prerequisites (once per company) — deploys network.yaml
+#    (skipped for BYO VPC), foundation.yaml, operational_roles.yaml, and
+#    jumpbox.yaml, all locally (no S3 bucket) and idempotently.
+./AWS/scripts/prereqs.sh <company> <env> [--vpc-id vpc-xxxx --subnet-ids subnet-a,subnet-b,subnet-c]
+
+# 2. Everything else: EKS cluster + infra + tenant registration, then
+#    (unless --skip-agent) agent enrollment.
+./AWS/scripts/deploy.sh <company> <env>
+```
+
+`<company>` is lowercase `[a-z0-9-]`, 15 characters or fewer. `<env>` is one
+of `dev` / `qa` / `preview` / `prod`. Installs default to a **private cluster
++ internal ALB** (VPN/in-VPC access only) — internet-facing is only for
+internal Promethium public-cluster deployments.
+
+Who runs what:
+
+| Step | Who |
+|---|---|
+| One-time per customer AWS account: cross-account grants (ECR pull, hub saas-role trust) | Promethium |
+| `prereqs.sh` (network / foundation / operational-roles / jumpbox CFTs) | Customer |
+| `deploy.sh` (cluster, infra, tenant registration) | Customer |
+| Agent enrollment: issue the mTLS cert + register it on the hub | Promethium |
+| Agent enrollment: deliver the cert bundle (out-of-band, via the customer's own tfstate S3 bucket) | Promethium → Customer |
+| Agent enrollment: install the agent on your cluster (`install-agent.sh`, called by `deploy.sh` unless `--skip-agent`) | Customer |
+| Validate (`kubectl -n intelligentedge get pods`, in-VPC) | Customer |
+
+Pass `deploy.sh --skip-agent` to stop after infrastructure if you'd rather run
+the 3-part agent enrollment separately. Teardown is one command,
+`./AWS/scripts/destroy.sh <company> <env>` — run it from a separate host,
+never from the jumpbox being torn down.
+
+See [AWS/scripts/README.md](scripts/README.md) for the full flag list and a
+step-by-step account of what each script does, and
+[AWS/runbook-agent-mode.md](runbook-agent-mode.md) for the complete runbook,
+including validation and troubleshooting.
+
+---
+
+# Prerequisites
+
+These apply to **both** install paths above.
 
 ### Environment Prerequisites
 
@@ -65,7 +131,7 @@ Once the customer has provided the prerequisite infrastructure and variables, th
 | Outbound Internet Access | The install VM and EKS nodes require outbound HTTPS access via NAT Gateway |
 | Company Name | A `${COMPANY_NAME}` variable used throughout the deployment — max 15 characters, lowercase, no spaces |
 | GitHub PAT | A GitHub Personal Access Token with `read:packages` scope (provided by Promethium) |
-| Promethium Image Tag | Application release version (e.g., `24.2.2`) — provided by Promethium |
+| Promethium Image Tag | Application release version (e.g., `24.6.0`) — provided by Promethium |
 
 ### VPC and Subnet Requirements
 
@@ -100,7 +166,7 @@ All private subnets must be tagged with the EKS cluster name **before** running 
 | Private | `kubernetes.io/role/internal-elb` | `1` |
 | Private | `kubernetes.io/cluster/<cluster_name>` | `owned` |
 
-Where `<cluster_name>` = `promethium-datafabric-prod-<company_name>-eks-cluster` if the customer did not already have a cluster with a custom name.
+Where `<cluster_name>` = `promethium-datafabric-<environment>-<company_name>-eks-cluster` (e.g. `prod` if the customer did not already have a cluster with a custom name).
 
 ### Networking Requirements
 
@@ -128,7 +194,109 @@ Where `<cluster_name>` = `promethium-datafabric-prod-<company_name>-eks-cluster`
 
 ---
 
-# Setup Customer Prerequisites
+# Customer Information Required by Promethium
+
+> **Which path needs this:** the manual (non-agent) path's associate-driven
+> pre-call ([aws-install-pre-call.md](aws-install-pre-call.md)) uses the
+> generated file below directly. On the **scripted path**, `deploy.sh` reads
+> the equivalent values straight from the `foundation.yaml` /
+> `operational_roles.yaml` / `network.yaml` / `jumpbox.yaml` stack outputs —
+> you don't need to generate or send this file. The underlying facts (account
+> ID, region, company name, image tag, and — for BYO VPC — your VPC/subnet
+> IDs) are still what Promethium needs to know about your environment either
+> way.
+
+Run the following command to collect all outputs from CFT Stacks you created so far into a file: `promethium-outputs-${COMPANY_NAME}.sh`. If you opted to provide your own IAC instead of using provided CFTs for at least one of VPC or Install VM / Jumpbox, the corresponding variable in `promethium-outputs-${COMPANY_NAME}.sh` will be an empty string, and you must supply the value yourself by editing the file after it is created.
+
+```bash
+{
+  get_output() { aws cloudformation describe-stacks --stack-name "$1" --query "Stacks[0].Outputs[?OutputKey==\`$2\`].OutputValue" --output text --region ${AWS_REGION} 2>/dev/null; }
+  INSTALL_STACK="promethium-install-role-${COMPANY_NAME}"
+  NETWORK_STACK="pmie-network-${COMPANY_NAME}"
+  JUMPBOX_STACK="pmie-jumpbox-${COMPANY_NAME}"
+  ROLES_STACK="promethium-eks-base-roles-${COMPANY_NAME}"
+  echo "export COMPANY_NAME=\"${COMPANY_NAME}\""
+  echo "export AWS_REGION=\"${AWS_REGION}\""
+  echo "export CUSTOMER_ACCOUNT_ID=\"$(aws sts get-caller-identity --query Account --output text --region ${AWS_REGION})\""
+  echo "export TERRAFORM_ASSUME_ROLE_ARN=\"$(get_output $INSTALL_STACK RoleArn)\""
+  echo "export INSTANCE_PROFILE_NAME=\"$(get_output $INSTALL_STACK InstanceProfileName)\""
+  echo "export VPC_ID=\"$(get_output $NETWORK_STACK VpcId)\""
+  echo "export VPC_CIDR=\"$(get_output $NETWORK_STACK VpcCidrBlock)\""
+  echo "export SUBNET1_ID=\"$(get_output $NETWORK_STACK Subnet1Id)\""
+  echo "export SUBNET2_ID=\"$(get_output $NETWORK_STACK Subnet2Id)\""
+  echo "export SUBNET3_ID=\"$(get_output $NETWORK_STACK Subnet3Id)\""
+  echo "export JUMPBOX_INSTANCE_ID=\"$(get_output $JUMPBOX_STACK JumpboxInstanceId)\""
+  echo "export JUMPBOX_SG_ID=\"$(get_output $JUMPBOX_STACK JumpboxSecurityGroupId)\""
+  echo "export EKS_CLUSTER_ROLE_ARN=\"$(get_output $ROLES_STACK EKSClusterRoleArn)\""
+  echo "export EKS_WORKER_ROLE_ARN=\"$(get_output $ROLES_STACK EKSWorkerNodeRoleArn)\""
+  echo "export EBS_CSI_ROLE_ARN=\"$(get_output $ROLES_STACK EBSCSIDriverRoleArn)\""
+  echo "export EFS_CSI_ROLE_ARN=\"$(get_output $ROLES_STACK EFSCSIDriverRoleArn)\""
+  echo "export LB_CONTROLLER_ROLE_ARN=\"$(get_output $ROLES_STACK LoadBalancerControllerRoleArn)\""
+  echo "export AUTOSCALER_ROLE_ARN=\"$(get_output $ROLES_STACK ClusterAutoscalerRoleArn)\""
+  echo "export PG_BACKUP_ROLE_ARN=\"$(get_output $ROLES_STACK PGBackupServiceRoleArn)\""
+  echo "export TRINO_ROLE_ARN=\"$(get_output $ROLES_STACK GlueTrinoServiceRoleArn)\""
+} | tee promethium-outputs-${COMPANY_NAME}.sh
+```
+
+The following sections describe the outputs collected above.
+
+### AWS Environment
+
+| # | Item | Where to find it |
+|---|------|-----------------|
+| 1 | AWS Account ID | Console → top-right menu |
+| 2 | AWS Region | Console → top navigation bar |
+| 3 | Agreed `company_name` | Agreed with Promethium representative |
+
+### VPC and Subnets
+
+**AWS Console → VPC → Your VPCs** → note VPC ID and CIDR
+
+**AWS Console → VPC → Subnets** → filter by VPC → find subnets routing via NAT Gateway
+
+| # | Item |
+|---|------|
+| 4 | VPC ID |
+| 5 | VPC CIDR block |
+| 6 | Private Subnet IDs (2 minimum, in different AZs) |
+
+### Install VM
+
+**AWS Console → EC2 → Instances** → find jumpbox
+
+| # | Item |
+|---|------|
+| 7 | Jumpbox Instance ID (`i-xxx`) |
+| 8 | Jumpbox Security Group ID (`sg-xxx`) |
+
+### Provided by Promethium
+
+| Item | Description |
+|------|-------------|
+| `promethium_image_tag` | Application version to deploy |
+| `company_name` | Agreed jointly with your Promethium representative |
+| GitHub PAT | Personal Access Token for private Terraform modules |
+| GHCR Token | Token for pulling Helm charts |
+
+---
+
+# Reference: manual (non-agent) install
+
+> **Superseded by the [scripted A′ flow](#quick-start-scripted-a) above for
+> new installs.** Kept here as a reference for customers/paths not yet on
+> Model A′ — it predates `argocd-agent`: the customer hand-creates each IAM
+> role CFT-by-CFT, a Promethium associate hand-creates and configures the
+> customer's Terraform branch before the call
+> ([aws-install-pre-call.md](aws-install-pre-call.md)), and the customer runs
+> Terraform directly, on-call with the associate
+> ([aws-install.md](aws-install.md)).
+
+Installing this way involves two parties across three sequential steps:
+- The customer first provides prerequisite AWS infrastructure (below) — VPC, subnets, install VM, install role, and operational IAM roles, etc.
+- The Promethium associate then completes pre-call setup — creating and configuring the customer's Terraform branch ([aws-install-pre-call.md](aws-install-pre-call.md)).
+- The customer then deploys the EKS cluster with Terraform, configures OIDC trust policies, and installs the full Promethium application stack — on-call with the Promethium associate ([aws-install.md](aws-install.md)).
+
+Promethium is always deployed with an **internal load balancer** — accessible via VPN only.
 
 Install jq (a JSON manipulation tool):
 ```bash
@@ -199,8 +367,10 @@ The template is located at [`AWS/CFT/network.yaml`](CFT/network.yaml) in this re
 
 #### Deploy the network stack
 
+> `Environment` and `CompanyName` are required parameters (no default) — both must be supplied.
+
 ```bash
-aws cloudformation create-stack --stack-name pmie-network-${COMPANY_NAME} --template-body file://AWS/CFT/network.yaml --parameters ParameterKey=VpcName,ParameterValue=${COMPANY_NAME}-vpc ParameterKey=VpcCidrBlock,ParameterValue=10.0.0.0/22 ParameterKey=EksClusterName,ParameterValue=promethium-datafabric-prod-${COMPANY_NAME}-eks-cluster --region ${AWS_REGION}
+aws cloudformation create-stack --stack-name pmie-network-${COMPANY_NAME} --template-body file://AWS/CFT/network.yaml --parameters ParameterKey=Environment,ParameterValue=prod ParameterKey=CompanyName,ParameterValue=${COMPANY_NAME} ParameterKey=VpcName,ParameterValue=${COMPANY_NAME}-vpc ParameterKey=VpcCidrBlock,ParameterValue=10.0.0.0/22 ParameterKey=EksClusterName,ParameterValue=promethium-datafabric-prod-${COMPANY_NAME}-eks-cluster --region ${AWS_REGION}
 ```
 
 ---
@@ -260,7 +430,7 @@ The template is located at [`AWS/CFT/jumpbox.yaml`](CFT/jumpbox.yaml).
 
 #### Deploy the jumpbox stack
 
-> NOTE: if you provided your own VPC (option 2.b), set `VPC_ID="<your-vpc-id>"` and `SUBNET1_ID="<your-private-subnet-id>"` from the values you noted in section 2.b (`VpcId` and `Subnet1Id`).
+> NOTE: if you provided your own VPC (option 2.b), set `VPC_ID="<your-vpc-id>"` and `SUBNET1_ID="<your-private-subnet-id>"` from the values you noted in section 2.b (`VpcId` and `Subnet1Id`). `Environment` is also a required parameter (no default).
 
 ```bash
 # If using Promethium network CFT (Option 2.a):
@@ -272,7 +442,7 @@ SUBNET1_ID=$(aws cloudformation describe-stacks --stack-name "pmie-network-${COM
 # VPC_ID="<your-vpc-id>"
 # SUBNET1_ID="<your-private-subnet-id>"
 
-aws cloudformation create-stack --stack-name pmie-jumpbox-${COMPANY_NAME} --template-body file://AWS/CFT/jumpbox.yaml --parameters ParameterKey=VpcId,ParameterValue=${VPC_ID} ParameterKey=PrivateSubnet1Id,ParameterValue=${SUBNET1_ID} ParameterKey=JumpboxName,ParameterValue=${COMPANY_NAME}-jumpbox ParameterKey=UseExistingInstanceProfile,ParameterValue=PromethiumDeploymentRole-${COMPANY_NAME}InstanceProfile --region ${AWS_REGION}
+aws cloudformation create-stack --stack-name pmie-jumpbox-${COMPANY_NAME} --template-body file://AWS/CFT/jumpbox.yaml --parameters ParameterKey=Environment,ParameterValue=prod ParameterKey=VpcId,ParameterValue=${VPC_ID} ParameterKey=PrivateSubnet1Id,ParameterValue=${SUBNET1_ID} ParameterKey=JumpboxName,ParameterValue=${COMPANY_NAME}-jumpbox ParameterKey=UseExistingInstanceProfile,ParameterValue=PromethiumDeploymentRole-${COMPANY_NAME}InstanceProfile --region ${AWS_REGION}
 ```
 
 > ℹ️ Deploy the install role (Section 1) **before** this stack to attach the instance profile automatically via `UseExistingInstanceProfile`.
@@ -299,28 +469,29 @@ Record the following variables for your self-provided jumpbox / install VM.
 
 Deploy [`CFT/operational_roles.yaml`](CFT/operational_roles.yaml).
 
-> `OIDCProviderUrl` is left as the default dummy value — it is updated after Phase 1a once the EKS cluster and OIDC provider exist.
+> `OIDCProviderUrl` is left as the default dummy value — it is updated after Phase 1a once the EKS cluster and OIDC provider exist. `Environment` and `CompanyName` are both required parameters (no default).
 
 Use this when the EKS cluster will be created by the Promethium Terraform deployment. The cluster name defaults to `promethium-datafabric-prod-${COMPANY_NAME}-eks-cluster`.
 
 ```bash
-aws cloudformation create-stack --stack-name promethium-eks-base-roles-${COMPANY_NAME} --template-body file://AWS/CFT/operational_roles.yaml --parameters ParameterKey=CompanyName,ParameterValue=${COMPANY_NAME} --capabilities CAPABILITY_NAMED_IAM --region ${AWS_REGION}
+aws cloudformation create-stack --stack-name promethium-eks-base-roles-${COMPANY_NAME} --template-body file://AWS/CFT/operational_roles.yaml --parameters ParameterKey=CompanyName,ParameterValue=${COMPANY_NAME} ParameterKey=Environment,ParameterValue=prod --capabilities CAPABILITY_NAMED_IAM --region ${AWS_REGION}
 ```
 
 ---
 
-This creates all 8 operational roles (all names are suffixed with `${COMPANY_NAME}`):
+This creates all 9 operational roles (all default names follow `promethium-<environment>-${COMPANY_NAME}-<role>`):
 
 | Role | Used By | Purpose |
 |------|---------|---------|
-| `promethium-prod-eks-cluster-role-${COMPANY_NAME}` | EKS control plane | Gives the EKS control plane permissions to run the cluster, manage AWS infrastructure, and manage pod-level networking |
-| `promethium-prod-eks-worker-role-${COMPANY_NAME}` | EKS worker nodes | Allows nodes to pull container images from ECR, manage EFS volumes via CSI driver, and handle network management within EKS |
-| `promethium-prod-ebs-csi-driver-role-${COMPANY_NAME}` | EBS CSI driver | Allows the EBS CSI driver to provision, attach, delete, and snapshot encrypted EBS volumes using KMS keys |
-| `promethium-prod-efs-csi-driver-role-${COMPANY_NAME}` | EFS CSI driver | Allows the EFS CSI driver to provision and manage EFS file systems and access points |
-| `promethium-prod-lb-controller-role-${COMPANY_NAME}` | Load Balancer Controller | Allows the LB Controller to provision and manage ALBs/NLBs on behalf of Kubernetes ingress and service resources |
-| `promethium-prod-cluster-autoscaler-role-${COMPANY_NAME}` | Cluster Autoscaler | Allows the autoscaler to add or remove worker nodes in Auto Scaling Groups based on cluster demand |
-| `promethium-prod-pg-backup-role-${COMPANY_NAME}` | Postgres backup | Allows postgres backups to be written to S3 and container images to be pulled from ECR |
-| `promethium-prod-glue-trino-role-${COMPANY_NAME}` | Trino / Glue crawlers | Allows Trino to query and manage data in Glue Data Catalog and S3, handle KMS-encrypted data, and interact with Glue jobs |
+| `promethium-prod-${COMPANY_NAME}-eks-cluster-role` | EKS control plane | Gives the EKS control plane permissions to run the cluster, manage AWS infrastructure, and manage pod-level networking |
+| `promethium-prod-${COMPANY_NAME}-eks-worker-role` | EKS worker nodes | Allows nodes to pull container images from ECR, manage EFS volumes via CSI driver, and handle network management within EKS |
+| `promethium-prod-${COMPANY_NAME}-ebs-csi-driver-role` | EBS CSI driver | Allows the EBS CSI driver to provision, attach, delete, and snapshot encrypted EBS volumes using KMS keys |
+| `promethium-prod-${COMPANY_NAME}-efs-csi-driver-role` | EFS CSI driver | Allows the EFS CSI driver to provision and manage EFS file systems and access points |
+| `promethium-prod-${COMPANY_NAME}-lb-controller-role` | Load Balancer Controller | Allows the LB Controller to provision and manage ALBs/NLBs on behalf of Kubernetes ingress and service resources |
+| `promethium-prod-${COMPANY_NAME}-cluster-autoscaler-role` | Cluster Autoscaler | Allows the autoscaler to add or remove worker nodes in Auto Scaling Groups based on cluster demand |
+| `promethium-prod-${COMPANY_NAME}-pg-backup-role` | Postgres backup | Allows postgres backups to be written to S3 and container images to be pulled from ECR |
+| `promethium-prod-${COMPANY_NAME}-trino-oidc-role` | Trino / Glue crawlers | Allows Trino to query and manage data in Glue Data Catalog and S3, handle KMS-encrypted data, and interact with Glue jobs |
+| `promethium-prod-${COMPANY_NAME}-argocd-ecr-refresher` | `argocd-ecr-cred-refresher` CronJob | Mints a short-lived ECR token so the cluster can pull the Promethium OCI umbrella chart / images — used by the agent (OCI) install path |
 
 **Outputs:**
 
@@ -334,6 +505,7 @@ This creates all 8 operational roles (all names are suffixed with `${COMPANY_NAM
 | `ClusterAutoscalerRoleArn` | `aws_eks_autoscaler_role_arn` in tfvars |
 | `PGBackupServiceRoleArn` | `pg_backup_cronjob_oidc_role_arn` in tfvars |
 | `GlueTrinoServiceRoleArn` | `trino_oidc_role_arn` in tfvars |
+| `ArgocdEcrRefresherRoleArn` | `ECR_REFRESHER_ROLE_ARN` (agent enrollment) |
 
 ---
 
@@ -473,83 +645,18 @@ aws iam delete-user-policy --user-name ${CUSTOMER_USER_NAME} --policy-name prome
 
 ---
 
-## 6. Customer Information Required by Promethium
+# Resources
 
-Run the following command to collect all outputs from CFT Stacks you created so far into a file: `promethium-outputs-${COMPANY_NAME}.sh`. If you opted to provide your own IAC instead of using provided CFTs for at least one of VPC or Install VM / Jumpbox, the corresponding variable in `promethium-outputs-${COMPANY_NAME}.sh` will be an empty string, and you must supply the value yourself by editing the file after it is created.
+**Scripted A′ install:**
 
-```bash
-{
-  get_output() { aws cloudformation describe-stacks --stack-name "$1" --query "Stacks[0].Outputs[?OutputKey==\`$2\`].OutputValue" --output text --region ${AWS_REGION} 2>/dev/null; }
-  INSTALL_STACK="promethium-install-role-${COMPANY_NAME}"
-  NETWORK_STACK="pmie-network-${COMPANY_NAME}"
-  JUMPBOX_STACK="pmie-jumpbox-${COMPANY_NAME}"
-  ROLES_STACK="promethium-eks-base-roles-${COMPANY_NAME}"
-  echo "export COMPANY_NAME=\"${COMPANY_NAME}\""
-  echo "export AWS_REGION=\"${AWS_REGION}\""
-  echo "export CUSTOMER_ACCOUNT_ID=\"$(aws sts get-caller-identity --query Account --output text --region ${AWS_REGION})\""
-  echo "export TERRAFORM_ASSUME_ROLE_ARN=\"$(get_output $INSTALL_STACK RoleArn)\""
-  echo "export INSTANCE_PROFILE_NAME=\"$(get_output $INSTALL_STACK InstanceProfileName)\""
-  echo "export VPC_ID=\"$(get_output $NETWORK_STACK VpcId)\""
-  echo "export VPC_CIDR=\"$(get_output $NETWORK_STACK VpcCidrBlock)\""
-  echo "export SUBNET1_ID=\"$(get_output $NETWORK_STACK Subnet1Id)\""
-  echo "export SUBNET2_ID=\"$(get_output $NETWORK_STACK Subnet2Id)\""
-  echo "export SUBNET3_ID=\"$(get_output $NETWORK_STACK Subnet3Id)\""
-  echo "export JUMPBOX_INSTANCE_ID=\"$(get_output $JUMPBOX_STACK JumpboxInstanceId)\""
-  echo "export JUMPBOX_SG_ID=\"$(get_output $JUMPBOX_STACK JumpboxSecurityGroupId)\""
-  echo "export EKS_CLUSTER_ROLE_ARN=\"$(get_output $ROLES_STACK EKSClusterRoleArn)\""
-  echo "export EKS_WORKER_ROLE_ARN=\"$(get_output $ROLES_STACK EKSWorkerNodeRoleArn)\""
-  echo "export EBS_CSI_ROLE_ARN=\"$(get_output $ROLES_STACK EBSCSIDriverRoleArn)\""
-  echo "export EFS_CSI_ROLE_ARN=\"$(get_output $ROLES_STACK EFSCSIDriverRoleArn)\""
-  echo "export LB_CONTROLLER_ROLE_ARN=\"$(get_output $ROLES_STACK LoadBalancerControllerRoleArn)\""
-  echo "export AUTOSCALER_ROLE_ARN=\"$(get_output $ROLES_STACK ClusterAutoscalerRoleArn)\""
-  echo "export PG_BACKUP_ROLE_ARN=\"$(get_output $ROLES_STACK PGBackupServiceRoleArn)\""
-  echo "export TRINO_ROLE_ARN=\"$(get_output $ROLES_STACK GlueTrinoServiceRoleArn)\""
-} | tee promethium-outputs-${COMPANY_NAME}.sh
-```
+| Resource | Description |
+|----------|-------------|
+| [AWS/scripts/README.md](scripts/README.md) | The wrapper scripts (`prereqs.sh` / `deploy.sh` / `destroy.sh`) — full command/flag reference |
+| [AWS/runbook-agent-mode.md](runbook-agent-mode.md) | The complete Model A′ runbook: accounts, prerequisites, install, agent enrollment, validation, teardown, troubleshooting |
+| [AWS/agent/README.md](agent/README.md) | The spoke agent installer (`install-agent.sh`) |
+| [CFT/README.md](CFT/README.md) | The CloudFormation templates `prereqs.sh` deploys (`network.yaml`, `foundation.yaml`, `operational_roles.yaml`, `jumpbox.yaml`) |
 
-The following sections describe the outputs collected above.
-
-### AWS Environment
-
-| # | Item | Where to find it |
-|---|------|-----------------|
-| 1 | AWS Account ID | Console → top-right menu |
-| 2 | AWS Region | Console → top navigation bar |
-| 3 | Agreed `company_name` | Agreed with Promethium representative |
-
-### VPC and Subnets
-
-**AWS Console → VPC → Your VPCs** → note VPC ID and CIDR
-
-**AWS Console → VPC → Subnets** → filter by VPC → find subnets routing via NAT Gateway
-
-| # | Item |
-|---|------|
-| 4 | VPC ID |
-| 5 | VPC CIDR block |
-| 6 | Private Subnet IDs (2 minimum, in different AZs) |
-
-### Install VM
-
-**AWS Console → EC2 → Instances** → find jumpbox
-
-| # | Item |
-|---|------|
-| 7 | Jumpbox Instance ID (`i-xxx`) |
-| 8 | Jumpbox Security Group ID (`sg-xxx`) |
-
-### Provided by Promethium
-
-| Item | Description |
-|------|-------------|
-| `promethium_image_tag` | Application version to deploy |
-| `company_name` | Agreed jointly with your Promethium representative |
-| GitHub PAT | Personal Access Token for private Terraform modules |
-| GHCR Token | Token for pulling Helm charts |
-
----
-
-## 7. Resources
+**Manual (non-agent) reference:**
 
 | Resource | Description |
 |----------|-------------|
@@ -557,8 +664,8 @@ The following sections describe the outputs collected above.
 | [AWS Install Guide](aws-install.md) | Run by the customer on-call with a Promethium associate |
 | [Install Role CFT](CFT/install_role.yaml) | Creates the Terraform deployment role and instance profile |
 | [Verifier Policy CFT](CFT/verifier_policy.yaml) | Adds read-only permissions for running pre-install verifier scripts from the jumpbox |
-| [Operational Roles CFT](CFT/operational_roles.yaml) | Creates EKS cluster role, worker role, and all 6 OIDC/IRSA roles |
+| [Operational Roles CFT](CFT/operational_roles.yaml) | Creates EKS cluster role, worker role, and all OIDC/IRSA roles (same file the scripted flow deploys via `prereqs.sh`) |
 | [S3 Private Crawler](CFT/s3-private-crawler/) | VPC gateway endpoint and Glue network connection for private S3 access |
+| [Utilities](utilities/) | Helper scripts for tool installation, role verification, and diagnostics |
 
 > For customers needing private S3 access for Trino and Glue crawlers, see the `CFT/s3-private-crawler` folder, which includes the deployment guidance and CloudFormation template for the gateway endpoint and Glue NETWORK connection.
-| [Utilities](utilities/) | Helper scripts for tool installation, role verification, and diagnostics |
