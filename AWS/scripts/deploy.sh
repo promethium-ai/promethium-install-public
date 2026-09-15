@@ -380,7 +380,7 @@ BUNDLE_DIR="${WORKDIR}/cert-bundle-${COMPANY_NAME}"
   [ -n "$HUB_PROFILE" ] && export AWS_PROFILE="$HUB_PROFILE"
   case "$ENVIRONMENT" in
     dev|qa)       HUB_CLUSTER="promethium-saas-backend"      ; HUB_REGION="us-east-1" ;;
-    preview|prod) HUB_CLUSTER="promethium-preview-eks-cluster"; HUB_REGION="us-east-2" ;;
+    preview|prod) HUB_CLUSTER="promethium-saas-backend-preview"; HUB_REGION="us-east-2" ;;
   esac
   chmod +x "${REPO_DIR}/scripts/issue-and-export-agent-cert.sh"
   "${REPO_DIR}/scripts/issue-and-export-agent-cert.sh" \
@@ -441,39 +441,15 @@ if [ -z "$IE_ECR_OCI_PW_DECODED" ]; then
 fi
 echo "  ie-ecr-oci password present (${#IE_ECR_OCI_PW_DECODED} bytes)."
 
-# ---- Step 9b: seed the intelligentedge image-pull secret (agent BYO) ----------
-# The OCI umbrella's pods pull container images cross-account from 734 ECR via
-# aws-ecr-docker-creds. In BYO the internal 10-min ecr-cron-job (same-account
-# design) does not provide this, so seed it here from the refresher token once
-# Argo has created the intelligentedge namespace, and give the ns default SA the
-# pull secret (bitnami postgres + any secret-less pod rely on the SA-injected
-# one). One-shot — the ECR token TTL (~12h) covers an install/demo; the durable
-# 6h refresh of THIS secret is tracked as codify C (umbrella/refresher).
-echo "  seeding intelligentedge image-pull secret (aws-ecr-docker-creds)..."
-for i in $(seq 1 30); do
-  kubectl --context "$SPOKE_CONTEXT" get ns intelligentedge >/dev/null 2>&1 && break
-  [ "$i" = 1 ] && echo "    waiting for the intelligentedge namespace (Argo umbrella sync)..."
-  sleep 10
-done
-if kubectl --context "$SPOKE_CONTEXT" get ns intelligentedge >/dev/null 2>&1; then
-  kubectl --context "$SPOKE_CONTEXT" -n intelligentedge create secret docker-registry aws-ecr-docker-creds \
-    --docker-server=734236616923.dkr.ecr.us-west-1.amazonaws.com \
-    --docker-username=AWS --docker-password="$IE_ECR_OCI_PW_DECODED" \
-    --dry-run=client -o yaml | kubectl --context "$SPOKE_CONTEXT" apply -f -
-  kubectl --context "$SPOKE_CONTEXT" -n intelligentedge patch sa default \
-    -p '{"imagePullSecrets":[{"name":"aws-ecr-docker-creds"}]}' >/dev/null 2>&1 || true
-  # bitnami postgres injects the pull secret from its SA at pod-creation → recreate the stuck pod
-  kubectl --context "$SPOKE_CONTEXT" -n intelligentedge delete pod -l app.kubernetes.io/name=postgresql >/dev/null 2>&1 || true
-  echo "  seeded aws-ecr-docker-creds + patched default SA in intelligentedge."
-else
-  echo "  WARN: intelligentedge namespace not present after ~5m — image pull will stall until aws-ecr-docker-creds is seeded there." >&2
-fi
-
-if kubectl --context "$SPOKE_CONTEXT" -n intelligentedge get secret aws-ecr-docker-creds >/dev/null 2>&1; then
-  echo "  aws-ecr-docker-creds present in intelligentedge."
-else
-  echo "  WARN: intelligentedge secret 'aws-ecr-docker-creds' not present yet — the namespace may not exist until the umbrella first syncs. Pods will ImagePullBackOff until the refresher writes this image-pull secret." >&2
-fi
+# ---- Step 9b: image pull via worker NODE role (no aws-ecr-docker-creds) --------
+# Umbrella 0.1.18+ carries NO aws-ecr-docker-creds imagePullSecret. The spoke's
+# kubelet ECR credential provider pulls the 734 container images via the worker
+# NODE role (incl. bitnami postgres + trino's named-SA pods), which
+# onboard-customer-account grants cross-account ECR pull. Nothing to seed here, and
+# image pull survives scale-to-zero (no 12h token-class secret to go stale).
+# PREREQ: that ECR grant must be applied for this customer AND the umbrella must be
+# 0.1.18+. Legacy 0.1.17 tenants still reference aws-ecr-docker-creds — do not use
+# this build for them.
 
 echo
 echo "== DONE. ${COMPANY_NAME}/${ENVIRONMENT} deployed. =="
