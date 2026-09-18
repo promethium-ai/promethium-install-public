@@ -14,9 +14,11 @@
 #
 # You provide (your cloud, stood up by the Promethium install Terraform):
 #   * an EKS cluster (the "spoke") and a kubeconfig context for it
-#   * if UMBRELLA_SOURCE=oci: an IRSA role in YOUR account that can pull the
-#     Promethium umbrella chart from ECR (ECR_REFRESHER_ROLE_ARN) — created by
-#     the install Terraform; its trust policy names this cluster's OIDC provider.
+#   * if UMBRELLA_SOURCE=oci: ECR pull for the Promethium umbrella chart. OPTIONALLY
+#     a dedicated IRSA role in YOUR account (ECR_REFRESHER_ROLE_ARN) created by the
+#     install Terraform (its trust policy names this cluster's OIDC provider). Omit it
+#     to run the refresher on the worker NODE instance role instead — which must
+#     already allow the ECR pull (e.g. an account that forbids creating new IAM roles).
 #
 # Usage:
 #   ./install-agent.sh --config agent-install.env --bundle ./bundle [--context <ctx>] [--dry-run]
@@ -60,7 +62,10 @@ for f in tls.crt tls.key ca.crt; do
 done
 
 if [ "$UMBRELLA_SOURCE" = "oci" ]; then
-  : "${ECR_REFRESHER_ROLE_ARN:?oci mode needs ECR_REFRESHER_ROLE_ARN (IRSA role in your account, from the install Terraform)}"
+  # OPTIONAL (was required): unset/empty is allowed. When empty the refresher SA gets NO
+  # eks.amazonaws.com/role-arn annotation (stripped below at manifest apply) and its pod falls
+  # back to the worker NODE instance role via IMDS. Set it to use a dedicated IRSA role instead.
+  : "${ECR_REFRESHER_ROLE_ARN:=}"
   : "${ECR_REGION:?oci mode needs ECR_REGION}"
   : "${ECR_REGISTRY:?oci mode needs ECR_REGISTRY (e.g. 734236616923.dkr.ecr.us-west-1.amazonaws.com)}"
   : "${CHART_NS:=charts}"
@@ -136,14 +141,22 @@ if [ "$UMBRELLA_SOURCE" = "oci" ]; then
   # Restrict envsubst to ONLY our placeholders so the CronJob's runtime shell
   # vars ($TOKEN etc.) survive — a bare envsubst would blank them.
   export ECR_REFRESHER_ROLE_ARN ECR_REGION ECR_REGISTRY CHART_NS
-  envsubst '${ECR_REFRESHER_ROLE_ARN} ${ECR_REGION} ${ECR_REGISTRY} ${CHART_NS}' < "$MANIFEST" | eval "$APPLY"
+  REFRESHER_YAML="$(envsubst '${ECR_REFRESHER_ROLE_ARN} ${ECR_REGION} ${ECR_REGISTRY} ${CHART_NS}' < "$MANIFEST")"
+  if [ -z "$ECR_REFRESHER_ROLE_ARN" ]; then
+    # No IRSA role → drop the now-empty eks.amazonaws.com/role-arn annotation entirely so the
+    # refresher SA carries none and its pod inherits the worker NODE instance role via IMDS
+    # (rather than applying an empty-value annotation). The manifest has exactly one such line.
+    note "ECR_REFRESHER_ROLE_ARN unset — refresher will run on the worker node instance role (no IRSA annotation)"
+    REFRESHER_YAML="$(printf '%s\n' "$REFRESHER_YAML" | sed '/eks\.amazonaws\.com\/role-arn:/d')"
+  fi
+  printf '%s\n' "$REFRESHER_YAML" | eval "$APPLY"
   if [ "$DRY_RUN" != "true" ]; then
     note "seed the OCI repo secret now (one-shot, don't wait for the 6h schedule)"
     kc -n argocd create job "ie-ecr-oci-bootstrap-$(date +%s)" --from=cronjob/argocd-ecr-cred-refresh || true
     kc -n argocd wait --for=condition=complete job -l job-name --timeout=150s 2>/dev/null || true
     kc -n argocd get secret ie-ecr-oci >/dev/null 2>&1 \
       && note "ie-ecr-oci present (real ECR token written)" \
-      || echo "   WARN: ie-ecr-oci not yet present — check the refresher job + IRSA role ${ECR_REFRESHER_ROLE_ARN}"
+      || echo "   WARN: ie-ecr-oci not yet present — check the refresher job + IRSA role ${ECR_REFRESHER_ROLE_ARN:-<none: worker node instance role>}"
   fi
 else
   : "${GIT_REPO_URL:?git mode needs GIT_REPO_URL}"; : "${GIT_USERNAME:?}"; : "${GIT_PASSWORD:?}"

@@ -12,7 +12,9 @@
 # (us-west-1 — the ECR region, NOT the workflow's us-east-1 hub region),
 # ECR_REGISTRY (734236616923.dkr.ecr.us-west-1.amazonaws.com), CHART_NS (charts).
 #
-# PREREQ (tf / operator, creds-gated): an IRSA role ECR_REFRESHER_ROLE_ARN in the
+# PREREQ (tf / operator, creds-gated) — OPTIONAL (omit ECR_REFRESHER_ROLE_ARN to run the
+# refresher on the worker NODE instance role instead, which must already allow the ECR pull):
+# an IRSA role ECR_REFRESHER_ROLE_ARN in the
 # tenant account trusting the spoke's OIDC provider + this SA
 # (argocd/argocd-ecr-cred-refresher), with:
 #   ecr:GetAuthorizationToken            (resource *)
@@ -26,6 +28,10 @@ metadata:
   name: argocd-ecr-cred-refresher
   namespace: argocd
   annotations:
+    # OPTIONAL IRSA role. install-agent.sh STRIPS this whole line before apply when
+    # ECR_REFRESHER_ROLE_ARN is empty, leaving the SA with no role-arn so the refresher pod
+    # falls back to the worker NODE instance role via IMDS (which must already allow the ECR
+    # pull — e.g. an account that forbids new IAM). When set, the pod assumes this role as before.
     eks.amazonaws.com/role-arn: "${ECR_REFRESHER_ROLE_ARN}"
 ---
 apiVersion: rbac.authorization.k8s.io/v1
