@@ -15,7 +15,15 @@ USERS=$(kc -n "$NAMESPACE" exec "$COORD" -c pm61trino-coordinator -- sh -c 'grep
 echo "  users: ${USERS}   (must equal your backup 'users=' baseline)"
 
 say "ExternalSecrets + app health"
-kc -n "$NAMESPACE" get externalsecret -o json 2>/dev/null | python3 -c 'import json,sys; [print("  %-38s %s"%(e["metadata"]["name"], (e.get("status",{}).get("conditions") or [{}])[-1].get("reason","?"))) for e in json.load(sys.stdin).get("items",[])]'
+# reuse-mode (externalSecrets:false) has no ExternalSecrets CRD, so `get externalsecret`
+# prints nothing and the parser would hit a JSONDecodeError (and, under set -e + pipefail,
+# abort the verify). Capture first; only parse when the output is non-empty AND valid JSON.
+_ES_JSON="$(kc -n "$NAMESPACE" get externalsecret -o json 2>/dev/null || true)"
+if [ -n "$_ES_JSON" ] && printf '%s' "$_ES_JSON" | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null; then
+  printf '%s' "$_ES_JSON" | python3 -c 'import json,sys; [print("  %-38s %s"%(e["metadata"]["name"], (e.get("status",{}).get("conditions") or [{}])[-1].get("reason","?"))) for e in json.load(sys.stdin).get("items",[])]'
+else
+  echo "  (no ExternalSecrets — reuse-mode / externalSecrets:false)"
+fi
 kch -n argocd get application "${TENANT}-${ENV}-ie" -o jsonpath='  app: sync={.status.sync.status} health={.status.health.status}' 2>/dev/null; echo
 
 say "postgres data (on the re-bound EBS volume)"

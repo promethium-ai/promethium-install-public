@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Phase 5 — wipe the legacy IE workloads so the umbrella deploys fresh. KEEPS: ServiceAccounts,
-# PVCs (incl the phase-4 re-bind), aws-ecr-docker-creds, the 2 legacy cronjobs, INGRESSES
+# PVCs (incl the phase-4 re-bind), aws-ecr-docker-creds, the legacy postgres-backup-cronjob, INGRESSES
 # (they stay on the promethium-ingress ALB with working DNS — do NOT re-create them), and the
 # migration-backup namespace. On a MANTRA tenant it ALSO keeps the live mantra-edge layer
 # (deploy/mantra-edge{,-mcp}, cronjob/mantra-edge-data-sampling, secret/mantra-edge-secret and
@@ -31,7 +31,8 @@ case "${MANTRA_TENANT:-auto}" in
        KEEP_MANTRA=true; else KEEP_MANTRA=false; fi ;;
 esac
 # exclusion regexes for the enumerate-and-grep-v deletes (mantra tail added only when KEEP_MANTRA)
-CJ_KEEP='^ecr-registry-helper$|^postgres-backup-cronjob$'
+# ecr-registry-helper dropped 2026-09-15 — redundant on A′ (agent refresher owns ECR creds) + leaks pod-slots; see ecr-registry-helper-slot-leak.
+CJ_KEEP='^postgres-backup-cronjob$'
 SEC_KEEP='^aws-ecr-docker-creds$'
 MANTRA_MSG=''
 if [ "$KEEP_MANTRA" = true ]; then
@@ -43,6 +44,29 @@ if [ "$KEEP_MANTRA" = true ]; then
   SEC_KEEP="$SEC_KEEP|^mantra-edge|^sh\.helm\.release\.v1\.mantra-edge"
   MANTRA_MSG=' + mantra-edge*'
   say "MANTRA tenant — sparing the live mantra-edge layer (deploy/svc/cm/role/cronjob/secret named mantra-edge*, + its sh.helm.release.v1.mantra-edge* release secret)"
+fi
+
+# --- ESO carve-out (platform secrets) ----------------------------------------------------
+# EXTERNAL_SECRETS=false (migration.env) → this tenant's umbrella has externalSecrets DISABLED
+# (tenant file spec.ie.externalSecrets: false), so NO ExternalSecret will recreate the platform
+# secrets after the wipe — e.g. DSA, whose account forbids IAM writes (no eso-reader role / SM).
+# PRESERVE the plain platform secrets (${PLATFORM_SECRETS[@]}, defined in lib.sh) through the wipe
+# so the umbrella's secretKeyRefs resolve. Anchored ^name$ per secret so ^edge-setting$ does NOT
+# also spare edge-setting-managed (06-restore re-seeds that). Default true (every other tenant)
+# leaves SEC_KEEP untouched → the ESO-on path is byte-for-byte unchanged.
+EXTERNAL_SECRETS="${EXTERNAL_SECRETS:-true}"
+ESO_MSG=''
+# services-subchart SA-token secrets: the chart's charts/services/templates/secrets.yaml renders
+# edge-setting + presto-catalog-account-secret + prestosync-token, ALL gated on createTenantSecret(s).
+# Reuse-mode derives global.createTenantSecrets=false (from externalSecrets:false), so the chart
+# SKIPS all three. edge-setting is in PLATFORM_SECRETS below; the two SA-token secrets are NOT — but
+# edge-update/prestosync/createredashuser consume prestosync-token via secretKeyRef{,token}, and the
+# chart won't re-create it, so the working legacy copies MUST survive the wipe too. (norole 2026-09-20)
+SATOKEN_SECRETS=(presto-catalog-account-secret prestosync-token)
+if [ "$EXTERNAL_SECRETS" = false ]; then
+  for s in "${PLATFORM_SECRETS[@]}" "${SATOKEN_SECRETS[@]}"; do SEC_KEEP="$SEC_KEEP|^${s}$"; done
+  ESO_MSG=' + platform + SA-token secrets (ESO off)'
+  say "ESO OFF (EXTERNAL_SECRETS=false) — also sparing the ${#PLATFORM_SECRETS[@]} plain platform secrets (${PLATFORM_SECRETS[*]}) + the services SA-token secrets (${SATOKEN_SECRETS[*]}) so the umbrella's secretKeyRefs resolve without ExternalSecrets."
 fi
 
 say "workloads (deploy/sts/ds/rs/svc/cm/role/rolebinding/hpa/job)${MANTRA_MSG:+, EXCEPT mantra-edge*}"
@@ -57,14 +81,14 @@ if [ "$KEEP_MANTRA" = true ]; then
 else
   kc -n "$NAMESPACE" delete deploy,sts,ds,rs,svc,cm,role,rolebinding,hpa,job --all --wait=false 2>&1 | tail -3
 fi
-say "cronjobs EXCEPT the 2 legacy${MANTRA_MSG}"
+say "cronjobs EXCEPT postgres-backup-cronjob${MANTRA_MSG}"
 for cj in $(kc -n "$NAMESPACE" get cronjob -o name 2>/dev/null | sed 's|.*/||' | grep -vE "$CJ_KEEP"); do
   kc -n "$NAMESPACE" delete cronjob "$cj" --wait=false 2>&1
 done
-say "secrets EXCEPT aws-ecr-docker-creds${MANTRA_MSG}"
+say "secrets EXCEPT aws-ecr-docker-creds${MANTRA_MSG}${ESO_MSG}"
 for s in $(kc -n "$NAMESPACE" get secret -o name 2>/dev/null | sed 's|secret/||' | grep -vE "$SEC_KEEP"); do
   kc -n "$NAMESPACE" delete secret "$s" --wait=false >/dev/null 2>&1
 done
-echo "  kept: SAs, PVCs, aws-ecr-docker-creds, cronjobs {ecr-registry-helper,postgres-backup-cronjob}, INGRESSES, ns/${BNS}${MANTRA_MSG:+, mantra-edge* (live mantra layer)}"
+echo "  kept: SAs, PVCs, aws-ecr-docker-creds, cronjobs {postgres-backup-cronjob}, INGRESSES, ns/${BNS}${MANTRA_MSG:+, mantra-edge* (live mantra layer)}${ESO_MSG:+, platform secrets {${PLATFORM_SECRETS[*]}} + SA-token secrets {${SATOKEN_SECRETS[*]}} (ESO off — plain k8s Secrets)}"
 echo "DONE. Enroll the agent (phase after this), then hard-refresh the hub app:"
 echo "  kubectl --context <hub> -n argocd annotate application ${TENANT}-${ENV}-ie argocd.argoproj.io/refresh=hard --overwrite"

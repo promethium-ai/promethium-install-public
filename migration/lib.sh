@@ -13,9 +13,9 @@ _LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ---- required / defaulted inputs ----
 : "${TENANT:?set TENANT (e.g. <tenant>) in migration.env}"
-: "${ENV:=dev}"
+: "${ENV:?set ENV (dev|qa|preview|prod) in migration.env}"
 : "${ACCOUNT:?set ACCOUNT in migration.env}"
-: "${REGION:=us-east-1}"
+: "${REGION:?set REGION (the tenant cluster region) in migration.env}"
 : "${NAMESPACE:=intelligentedge}"
 # HOSTED_ZONE_ID: the Route53 zone for <ENV>.promethium.ai. This differs per env/account
 # (no single correct default) — ask your Promethium contact for the zone id.

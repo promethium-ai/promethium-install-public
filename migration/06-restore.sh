@@ -8,6 +8,23 @@
 export NS="$NAMESPACE"          # for the secret-restore python (os.environ["NS"])
 FM="--field-manager=OpenAPI-Generator"
 
+# ESO toggle (see 05-wipe.sh + migration.env). Default true = the umbrella's ExternalSecrets
+# recreate the platform secrets post-sync. When false (e.g. DSA — account forbids IAM writes, no
+# ESO), 05-wipe PRESERVED the plain platform secrets through the wipe; verify they survived so the
+# umbrella's secretKeyRefs resolve. Read-only (kubectl get) — no secret value is decoded. Skipped
+# on the default (ESO-on) path, so every other tenant is byte-for-byte unaffected.
+EXTERNAL_SECRETS="${EXTERNAL_SECRETS:-true}"
+if [ "$EXTERNAL_SECRETS" = false ]; then
+  say "0. ESO OFF — verify the ${#PLATFORM_SECRETS[@]} plain platform secrets survived the wipe (05-wipe keep-list)"
+  for s in "${PLATFORM_SECRETS[@]}"; do
+    if kc -n "$NAMESPACE" get secret "$s" >/dev/null 2>&1; then
+      echo "  present: $s"
+    else
+      echo "  >>> WARNING: $s MISSING — 05-wipe should have preserved it (EXTERNAL_SECRETS=false); the umbrella's secretKeyRef will not resolve"
+    fi
+  done
+fi
+
 say "1. restore *-credentials secrets (base64-preserved, never decoded)"
 for b in $(kc -n "$BNS" get secret -o name 2>/dev/null | sed 's|secret/||' | grep '^backup-.*-credentials'); do
   kc -n "$BNS" get secret "$b" -o json | python3 -c '

@@ -48,7 +48,13 @@ fi
 # is names/metadata only (secret VALUES are never included: `get secret -o wide` prints only
 # name/type/data-count), so it is safe to hold in a ConfigMap and honours the no-plaintext rule.
 say "namespace inventory (forensic record of every object present, pre-wipe)"
-INV="$(kc -n "$NAMESPACE" get all,cm,secret,ingress,cronjob,pvc,sa,role,rolebinding,networkpolicy,pdb,externalsecret -o wide 2>&1)"
+# externalsecret is a CRD; in reuse-mode (externalSecrets:false) the ESO CRD is ABSENT, so
+# listing it makes `get` exit non-zero and set -e kills the backup right here (before the
+# baseline counts). Add it only when the CRD exists, and keep the whole capture best-effort
+# (|| true) — this inventory is a forensic record, never a restore dependency. (cleannorole 2026-09-21)
+INV_KINDS="all,cm,secret,ingress,cronjob,pvc,sa,role,rolebinding,networkpolicy,pdb"
+kc get crd externalsecrets.external-secrets.io >/dev/null 2>&1 && INV_KINDS="${INV_KINDS},externalsecret"
+INV="$(kc -n "$NAMESPACE" get $INV_KINDS -o wide 2>&1 || true)"
 kc -n "$BNS" create configmap backup-namespace-inventory \
   --from-literal=captured="$(date -u +%FT%TZ)" \
   --from-literal=namespace="$NAMESPACE" \
@@ -56,9 +62,13 @@ kc -n "$BNS" create configmap backup-namespace-inventory \
   --dry-run=client -o yaml 2>/dev/null | kc apply -f - >/dev/null \
   && echo "  saved backup-namespace-inventory ($(printf '%s\n' "$INV" | grep -c .) lines)"
 
-CAT=$(kc -n "$BNS" get cm backup-pm61trino-catalog -o json 2>/dev/null | python3 -c 'import json,sys;print(sum(1 for k in json.load(sys.stdin).get("data",{}) if k.endswith(".properties")))')
-USR=$(kc -n "$BNS" get cm backup-pm61trino-coordinator -o json 2>/dev/null | python3 -c 'import json,sys;print(sum(1 for l in json.load(sys.stdin).get("data",{}).get("password.db","").splitlines() if ":" in l))')
-CRD=$(kc -n "$BNS" get secret --no-headers 2>/dev/null | grep -c -- '-credentials')
+# All three counts are best-effort — a fresh tenant can have 0 catalogs / 0 credential secrets,
+# and `grep -c` exits 1 on zero matches (python exits 1 on an empty/missing cm), which under
+# set -e + pipefail would kill the script BEFORE the DONE line. Guard each so DONE always prints
+# the baseline. (cleannorole 2026-09-21)
+CAT=$(kc -n "$BNS" get cm backup-pm61trino-catalog -o json 2>/dev/null | python3 -c 'import json,sys;print(sum(1 for k in json.load(sys.stdin).get("data",{}) if k.endswith(".properties")))' 2>/dev/null || echo 0)
+USR=$(kc -n "$BNS" get cm backup-pm61trino-coordinator -o json 2>/dev/null | python3 -c 'import json,sys;print(sum(1 for l in json.load(sys.stdin).get("data",{}).get("password.db","").splitlines() if ":" in l))' 2>/dev/null || echo 0)
+CRD=$(kc -n "$BNS" get secret --no-headers 2>/dev/null | grep -c -- '-credentials' || true)
 ESM=$(kc -n "$BNS" get secret backup-edge-setting -o json 2>/dev/null | python3 -c '
 import json,sys
 try: d=json.load(sys.stdin).get("data") or {}
