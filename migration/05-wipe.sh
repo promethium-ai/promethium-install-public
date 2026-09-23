@@ -7,6 +7,13 @@
 # any mantra-edge* svc/cm/role) — auto-detected, or forced with MANTRA_TENANT=true in migration.env.
 # GUARDED: refuses unless the phase-3 backup exists.
 #
+# Also (all tenants): deletes the umbrella-owned legacy StorageClasses (redis-ebs-sc,
+# remote-job-ebs-sc) so Argo recreates them fresh — an SC's .parameters are IMMUTABLE and a
+# legacy-vs-umbrella mismatch wedges the WHOLE app OutOfSync; deleting an SC does NOT touch
+# already-bound PVCs/PVs. In REUSE-MODE (EXTERNAL_SECRETS=false, e.g. a customer account) it
+# ALSO suspends the kept postgres-backup-cronjob (it pushes DB dumps to Promethium's OWN
+# cross-account bucket, which a customer SCP denies → hourly failures).
+#
 # ⚠ BEFORE running this, raise the nodegroup floor so the emptied cluster's autoscaler can't
 #    scale to 0 and deadlock the redeploy:
 #      aws eks update-nodegroup-config --cluster-name <cluster> --nodegroup-name <ng> \
@@ -85,10 +92,44 @@ say "cronjobs EXCEPT postgres-backup-cronjob${MANTRA_MSG}"
 for cj in $(kc -n "$NAMESPACE" get cronjob -o name 2>/dev/null | sed 's|.*/||' | grep -vE "$CJ_KEEP"); do
   kc -n "$NAMESPACE" delete cronjob "$cj" --wait=false 2>&1
 done
+# --- reuse-mode: suspend the cross-account postgres backup --------------------------------
+# postgres-backup-cronjob is KEPT above, but it pushes DB dumps to Promethium's OWN
+# promethium-postgres-backups-<env>-* bucket cross-account. In a customer account an org SCP
+# denies s3:PutObject → the hourly job fails forever (alert noise, no useful backup). In
+# reuse-mode SUSPEND it (do NOT delete — keep it visible + re-enablable). Customer-account
+# backups are a SEPARATE strategy (a bucket in the customer's own account, or the customer owns
+# backups); the DB itself is protected by the Retain EBS volume + the pre-wipe cutover EBS
+# snapshot (runbook step 4b). Idempotent (patching suspend:true again is a no-op).
+if [ "$EXTERNAL_SECRETS" = false ] && kc -n "$NAMESPACE" get cronjob postgres-backup-cronjob >/dev/null 2>&1; then
+  kc -n "$NAMESPACE" patch cronjob postgres-backup-cronjob -p '{"spec":{"suspend":true}}' >/dev/null 2>&1 \
+    && say "reuse-mode: suspended postgres-backup-cronjob (cross-account S3 PutObject denied by customer SCP; customer-account backups are separate)"
+fi
 say "secrets EXCEPT aws-ecr-docker-creds${MANTRA_MSG}${ESO_MSG}"
 for s in $(kc -n "$NAMESPACE" get secret -o name 2>/dev/null | sed 's|secret/||' | grep -vE "$SEC_KEEP"); do
   kc -n "$NAMESPACE" delete secret "$s" --wait=false >/dev/null 2>&1
 done
+
+# --- legacy StorageClass recreate (immutable .parameters) --------------------------------
+# StorageClasses the umbrella ALSO defines (redis-ebs-sc, remote-job-ebs-sc) can carry
+# different .parameters in the legacy install than the umbrella ships. An SC's .parameters are
+# IMMUTABLE, so at sync Argo can neither update them nor progress and the WHOLE app wedges:
+#   "StorageClass ... is invalid: parameters: Forbidden: updates to parameters are forbidden"
+# Delete the umbrella-owned ones NOW (before enroll/sync) so Argo recreates them fresh. SAFE:
+# deleting a StorageClass does NOT touch PVCs/PVs already bound through it (the binding is
+# recorded on the PV, not the SC) — so no data volume is affected. Curated to ONLY the SCs the
+# umbrella will recreate; cluster-scoped (no -n); get-guarded + idempotent (skips any absent).
+# (SCs are cluster-scoped, so this runs for every tenant, but it is the wedge that most often
+#  bites a legacy/reuse tenant whose SC params predate the umbrella.)
+say "delete umbrella-owned legacy StorageClasses so Argo recreates them fresh (immutable .parameters; PVC/PV-safe)"
+UMBRELLA_SCS=(redis-ebs-sc remote-job-ebs-sc)
+for sc in "${UMBRELLA_SCS[@]}"; do
+  if kc get sc "$sc" >/dev/null 2>&1; then
+    kc delete sc "$sc" --wait=false >/dev/null 2>&1 && echo "  deleted sc/$sc (Argo recreates at sync; bound PVCs/PVs untouched)"
+  else
+    echo "  sc/$sc absent — skip"
+  fi
+done
+
 echo "  kept: SAs, PVCs, aws-ecr-docker-creds, cronjobs {postgres-backup-cronjob}, INGRESSES, ns/${BNS}${MANTRA_MSG:+, mantra-edge* (live mantra layer)}${ESO_MSG:+, platform secrets {${PLATFORM_SECRETS[*]}} + SA-token secrets {${SATOKEN_SECRETS[*]}} (ESO off — plain k8s Secrets)}"
 echo "DONE. Enroll the agent (phase after this), then hard-refresh the hub app:"
 echo "  kubectl --context <hub> -n argocd annotate application ${TENANT}-${ENV}-ie argocd.argoproj.io/refresh=hard --overwrite"

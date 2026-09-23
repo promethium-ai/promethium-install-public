@@ -69,6 +69,9 @@ if [ "$UMBRELLA_SOURCE" = "oci" ]; then
   : "${ECR_REGION:?oci mode needs ECR_REGION}"
   : "${ECR_REGISTRY:?oci mode needs ECR_REGISTRY (e.g. 734236616923.dkr.ecr.us-west-1.amazonaws.com)}"
   : "${CHART_NS:=charts}"
+  # Tenant workload namespace — used only by the reuse-mode image-pull refresher (step 4b), which
+  # self-activates only when this namespace already holds an aws-ecr-docker-creds Secret.
+  : "${TENANT_NAMESPACE:=intelligentedge}"
 fi
 
 # ---- confirm the target cluster (guard against wrong-context applies) --------
@@ -158,6 +161,39 @@ if [ "$UMBRELLA_SOURCE" = "oci" ]; then
       && note "ie-ecr-oci present (real ECR token written)" \
       || echo "   WARN: ie-ecr-oci not yet present — check the refresher job + IRSA role ${ECR_REFRESHER_ROLE_ARN:-<none: worker node instance role>}"
   fi
+
+  # ---- 4b. workload image-pull secret refresher (reuse-mode / legacy umbrella) ----
+  # A legacy (pre-0.1.18) umbrella references a NAMESPACED workload image-pull Secret
+  # ${TENANT_NAMESPACE}/aws-ecr-docker-creds (type dockerconfigjson, holding an ECR token, ~12h
+  # TTL). In the legacy install a cronjob (ecr-registry-helper) refreshed it; the legacy->A'
+  # migration REMOVES that cronjob (05-wipe), and the OCI refresher above refreshes ONLY
+  # argocd/ie-ecr-oci (the umbrella CHART repo-creds), NOT this workload Secret — so every fresh
+  # image pull 403s ~12h after install (the node image cache masks it until a pod reschedules).
+  # Install a dedicated refresher that re-mints aws-ecr-docker-creds every 4h, REUSING the same SA
+  # + IRSA role as the OCI refresher (no new IAM). Auto-activated ONLY when the Secret already
+  # exists in the tenant namespace (i.e. a legacy/reuse tenant); a greenfield 0.1.18+ install has
+  # no such Secret (kubelet pulls via the worker node role, see step 7) so this is SKIPPED and that
+  # path stays byte-for-byte unchanged. Idempotent (declarative apply; upsert is a no-op on re-run).
+  if kc -n "$TENANT_NAMESPACE" get secret aws-ecr-docker-creds >/dev/null 2>&1; then
+    note "reuse-mode: ${TENANT_NAMESPACE}/aws-ecr-docker-creds present — installing ie-imagepull-refresh CronJob (every 4h)"
+    IP_MANIFEST="$(dirname "$0")/manifests/ie-imagepull-refresh.yaml"
+    [ -f "$IP_MANIFEST" ] || die "missing $IP_MANIFEST (bundled with this installer)"
+    # Same whitelist trick as the OCI refresher: substitute ONLY our placeholders so the CronJob's
+    # runtime shell vars ($TOKEN etc.) survive envsubst.
+    export ECR_REGION ECR_REGISTRY TENANT_NAMESPACE
+    IMAGEPULL_YAML="$(envsubst '${ECR_REGION} ${ECR_REGISTRY} ${TENANT_NAMESPACE}' < "$IP_MANIFEST")"
+    printf '%s\n' "$IMAGEPULL_YAML" | eval "$APPLY"
+    if [ "$DRY_RUN" != "true" ]; then
+      note "seed aws-ecr-docker-creds now (one-shot, don't wait for the 4h schedule)"
+      kc -n argocd create job "ie-imagepull-bootstrap-$(date +%s)" --from=cronjob/ie-imagepull-refresh || true
+      kc -n argocd wait --for=condition=complete job -l job-name --timeout=150s 2>/dev/null || true
+      kc -n "$TENANT_NAMESPACE" get secret aws-ecr-docker-creds >/dev/null 2>&1 \
+        && note "aws-ecr-docker-creds present/refreshed in ${TENANT_NAMESPACE}" \
+        || echo "   WARN: aws-ecr-docker-creds refresh job did not complete — check the ie-imagepull-refresh job + IRSA role ${ECR_REFRESHER_ROLE_ARN:-<none: worker node instance role>}"
+    fi
+  else
+    note "no ${TENANT_NAMESPACE}/aws-ecr-docker-creds — skipping image-pull refresher (greenfield 0.1.18+ pulls via the worker node role)"
+  fi
 else
   : "${GIT_REPO_URL:?git mode needs GIT_REPO_URL}"; : "${GIT_USERNAME:?}"; : "${GIT_PASSWORD:?}"
   note "install git repo-creds for the umbrella (git mode)"
@@ -202,8 +238,9 @@ kc -n argocd rollout status  deployment/argocd-agent-agent --timeout=180s
 # onboard-customer-account grants cross-account ECR pull. So there is nothing to
 # seed here and image pull survives scale-to-zero (no 12h token-class secret to go
 # stale). PREREQ: that ECR grant must be applied for this customer AND the umbrella
-# must be 0.1.18+. Legacy 0.1.17 tenants still reference aws-ecr-docker-creds — do
-# not use this build for them.
+# must be 0.1.18+. Legacy (<0.1.18) / reuse-mode tenants DO still reference
+# aws-ecr-docker-creds — step 4b above installs the ie-imagepull-refresh CronJob for
+# them automatically (only when that Secret is present), so those migrations are covered.
 
 echo
 note "DONE. Agent installed and dialing out to ${PRINCIPAL_ADDRESS}:${PRINCIPAL_PORT}."

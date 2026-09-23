@@ -38,6 +38,23 @@ The scripts are numbered in the order you run them. A few steps in the middle ar
 | 7 | `08-ingress-dns.sh` | Adds any missing ingress route and DNS record. Run this **before** step 8 — verification checks external reachability. |
 | 8 | `07-verify.sh` | Read-only checks that everything matches your step-3 baseline: catalogs, users, Postgres data, and external HTTPS access. |
 
+## If your tenant runs in your own AWS account
+
+If Promethium is migrating a tenant that lives in **your** AWS account, a few things are handled for
+you — no extra action on your side beyond the run order above:
+
+- **Container-image pull credentials are managed for you.** During the agent handoff, Promethium sets
+  up and keeps refreshed the credentials your cluster uses to pull the Promethium images, and wires
+  them to the workloads that need them. You don't create or rotate anything for this.
+- **Your data stays protected; the built-in backup job may change.** The migration keeps your database
+  on your existing (retained) data volume and a snapshot is taken before any destructive step. The
+  legacy hourly backup job that shipped to Promethium-owned storage is paused, since your account's
+  policies won't allow it — Promethium coordinates any replacement backup with you separately.
+- **Verify from inside your network.** If your tenant is reached over a **private/internal** load
+  balancer, run the final login + `SHOW CATALOGS` check (and any query test) from **inside your own
+  VPC/VPN**. From outside it, results pages can look empty or stuck even when the migration succeeded —
+  that's network reachability, not a failure.
+
 ## If a step fails
 
 Stop, capture the script's output, and contact your Promethium representative — don't

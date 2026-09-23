@@ -57,6 +57,65 @@ else
   echo "  edge-setting-managed: SKIPPED (no backup-edge-setting; CDATA_OEM_KEY/TRINO_PASSWORD refs will not resolve)"
 fi
 
+say "1c. attach aws-ecr-docker-creds as an imagePullSecret on every SA in $NAMESPACE (reuse-mode)"
+# Reuse-mode leaves the workload image-pull Secret aws-ecr-docker-creds attached to NO
+# ServiceAccount, so pods fall back to the worker node role and 403 on any uncached
+# promethium/* | services/ie/* | iac/* image (the node cache masks it until a pod reschedules).
+# Attach it to EVERY SA so pods authenticate the pull. This is the RUNTIME COMPANION to fix #1
+# in install-agent.sh (the ie-imagepull-refresh CronJob keeps aws-ecr-docker-creds itself fresh);
+# the DURABLE home is a global imagePullSecret baked into the umbrella. Auto-gated on the Secret
+# being present, so ESO-on / 0.1.18+ tenants that pull via the node role are untouched (no ref to
+# a non-existent Secret). Idempotent + non-clobbering: skip an SA that already lists it, and
+# preserve any other imagePullSecrets it already has.
+if kc -n "$NAMESPACE" get secret aws-ecr-docker-creds >/dev/null 2>&1; then
+  IPS_PATCHED=0; IPS_SKIPPED=0
+  for sa in $(kc -n "$NAMESPACE" get sa -o name 2>/dev/null); do
+    names="$(kc -n "$NAMESPACE" get "$sa" -o jsonpath='{.imagePullSecrets[*].name}' 2>/dev/null || true)"
+    if printf '%s\n' $names | grep -qx aws-ecr-docker-creds; then IPS_SKIPPED=$((IPS_SKIPPED + 1)); continue; fi
+    ips="$(printf '%s\n' $names aws-ecr-docker-creds | sed '/^$/d' | sort -u | python3 -c '
+import json,sys
+print(json.dumps({"imagePullSecrets":[{"name":n.strip()} for n in sys.stdin if n.strip()]}))')"
+    kc -n "$NAMESPACE" patch "$sa" -p "$ips" >/dev/null 2>&1 && IPS_PATCHED=$((IPS_PATCHED + 1)) || true
+  done
+  echo "  imagePullSecrets: patched ${IPS_PATCHED} SA(s), ${IPS_SKIPPED} already had it"
+else
+  echo "  imagePullSecrets: SKIPPED (no aws-ecr-docker-creds in $NAMESPACE — node-role pull path)"
+fi
+
+say "1d. remote-job-service key-alias (legacy lowercase-hyphen -> umbrella UPPERCASE_UNDERSCORE, base64-preserved)"
+# The legacy remote-job-service Secret names its keys lowercase-hyphen (beanstalk-api, ...) but
+# the umbrella Deployment reads UPPERCASE_UNDERSCORE (BEANSTALK_API, ...) via secretKeyRef. In
+# reuse-mode the legacy Secret is PRESERVED as-is (05-wipe), so those refs miss and the container
+# boots with empty/absent envs. Add the UPPERCASE aliases by COPYING the base64 value from the
+# lowercase key — base64 flows json->json->patch via stdin, NEVER decoded, NEVER a tempfile
+# (secrets rule). Only add an alias when the lowercase key EXISTS and the UPPERCASE key is MISSING
+# (idempotent; never overwrites an existing value). Reuse-mode only — an ESO-on tenant gets the
+# correctly-named keys straight from SecretsManager, and patching that ESO-owned Secret would just
+# race edge-update/ESO. Mirrors the edge-setting-managed re-seed style above.
+if [ "$EXTERNAL_SECRETS" = false ] && kc -n "$NAMESPACE" get secret remote-job-service >/dev/null 2>&1; then
+  ALIAS_PATCH="$(kc -n "$NAMESPACE" get secret remote-job-service -o json | python3 -c '
+import json,sys
+d=json.load(sys.stdin); data=d.get("data") or {}
+MAP={"beanstalk-api":"BEANSTALK_API","beanstalk-api-key":"BEANSTALK_API_KEY",
+     "dispatcher-api":"DISPATCHER_API","dispatcher-api-key":"DISPATCHER_API_KEY",
+     "redash-api":"REDASH_API","source-decrypt-access-key":"SOURCE_DECRYPT_ACCESS_KEY",
+     "source-decrypt-secret-key":"SOURCE_DECRYPT_SECRET_KEY","source-decrypt-region":"SOURCE_DECRYPT_REGION"}
+add={up:data[lo] for lo,up in MAP.items() if lo in data and up not in data}
+print(json.dumps({"data":add}) if add else "")')"
+  if [ -n "$ALIAS_PATCH" ]; then
+    printf '%s' "$ALIAS_PATCH" | kc -n "$NAMESPACE" patch secret remote-job-service --type=merge --patch-file=/dev/stdin >/dev/null
+    echo "  remote-job-service: added $(printf '%s' "$ALIAS_PATCH" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["data"]))') UPPERCASE alias key(s)"
+    # the new envs load only on a fresh pod; restart the consumer (safe: in reuse-mode the umbrella
+    # does not manage this preserved Secret, so no self-heal fight).
+    if kc -n "$NAMESPACE" get deploy remote-job-service >/dev/null 2>&1; then
+      kc -n "$NAMESPACE" rollout restart deploy remote-job-service >/dev/null 2>&1 || true
+      echo "  remote-job-service: rollout restarted to load the alias envs"
+    fi
+  else
+    echo "  remote-job-service: aliases already present (or lowercase keys absent) — nothing to add"
+  fi
+fi
+
 say "2/3/4. merge catalog .properties + password.db users + coordinator/worker env-patches (OpenAPI-Generator)"
 eval "$(kc -n "$BNS" get cm backup-pm61trino-catalog backup-pm61trino-coordinator -o json 2>/dev/null | python3 -c '
 import json,sys,re,shlex
