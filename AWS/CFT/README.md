@@ -1,33 +1,130 @@
 # Promethium IAM CloudFormation Templates
 
-This package contains two CloudFormation templates that configure the necessary IAM roles and permissions for deploying and operating Promethium Intelligent Edge on AWS.
+This directory contains the CloudFormation templates used to install
+Promethium Intelligent Edge on AWS — IAM roles, networking, and the jumpbox.
 
 ## Overview
 
-- **install_role.yaml** - Creates the deployment role used by Terraform to install Promethium infrastructure
-- **operational_roles.yaml** - Creates the operational roles needed by the EKS cluster and its services
+The **scripted Model A′ install** ([../scripts/README.md](../scripts/README.md))
+deploys four of these templates via `AWS/scripts/prereqs.sh`, in order:
 
-## Template 1: install_role.yaml
+| Template | Creates |
+|---|---|
+| [`network.yaml`](network.yaml) | VPC, 3 private subnets + 1 public subnet, Internet Gateway + NAT Gateway, route tables (skipped for BYO VPC) |
+| [`foundation.yaml`](foundation.yaml) | The Terraform deploy/install role (+ instance profile) and the Terraform state S3 bucket |
+| [`operational_roles.yaml`](operational_roles.yaml) | The 9 EKS/OIDC operational roles (EBS/EFS CSI driver, LB controller, cluster autoscaler, EKS cluster + worker-node, PG backup, Glue/Trino, ArgoCD ECR refresher) + the Lambda-backed `TagResolver` custom resource |
+| [`jumpbox.yaml`](jumpbox.yaml) | The EC2 install VM (self-installs git/Terraform/kubectl/Helm via `UserData` at boot) |
 
-### Purpose
-Creates an IAM role and instance profile that Terraform uses to deploy the Promethium EKS infrastructure.
+`prereqs.sh` deploys all four locally (`aws cloudformation deploy
+--template-file`, no S3 bucket, no upload credentials) and idempotently, in
+the order above. See [../scripts/README.md](../scripts/README.md) for exact
+usage and why `foundation.yaml` and `operational_roles.yaml` are two
+templates rather than one (CloudFormation's 51,200-byte inline-template size
+limit — a single combined template ran to ~64.9 KB).
 
-### Permissions Included
-The deployment role has permissions to create and manage:
-- EKS clusters and node groups
-- VPC networking (subnets, security groups, routing)
-- EFS file systems
-- S3 buckets (Trino data, PostgreSQL backups)
-- KMS encryption keys
-- ACM certificates
-- EC2 instances and launch templates
-- AWS Glue databases and catalogs
-- Elastic Load Balancers
+> **Legacy / manual-path templates.** [`install_role.yaml`](install_role.yaml)
+> and [`verifier_policy.yaml`](verifier_policy.yaml) predate this split and
+> remain here for the **manual (non-agent) install** path documented in
+> [../README.md → Reference: manual (non-agent) install](../README.md#reference-manual-non-agent-install)
+> — they are not used by the scripted flow.
+> [`tfstate-bootstrap.yaml`](tfstate-bootstrap.yaml) is superseded entirely:
+> its `TfStateBucket` resource was folded directly into `foundation.yaml`
+> (same bucket name, `promethium-tfstate-${AWS::AccountId}`), and it is not
+> deployed by either path.
 
-### Parameters
-- **PromethiumInstallRole**: Name for the deployment role (default: `PromethiumDeploymentRole`)
+---
 
-### Deployment
+## `network.yaml`
+
+**Purpose:** Creates the VPC, subnets, and NAT Gateway for a greenfield
+(Promethium-created) install. Skipped entirely when the customer brings
+their own VPC (`prereqs.sh --vpc-id ... --subnet-ids ...` /
+`deploy.sh --vpc-id ... --subnet-ids ...`).
+
+**Creates:**
+- VPC with configurable CIDR (minimum `/22`)
+- 3 private subnets (EKS nodes + internal ALB) + 1 public subnet (NAT Gateway only)
+- Internet Gateway, NAT Gateway, route tables and associations
+
+**Parameters:** `Environment`, `CompanyName` (both required, no default — used
+to compute the default EKS cluster name for subnet tagging), `VpcName`,
+`VpcCidrBlock` (default `10.0.0.0/22`), `EksClusterName` (optional override).
+
+**Outputs:** `VpcId`, `VpcCidrBlock`, `Subnet1Id`, `Subnet2Id`, `Subnet3Id`
+(private), `Subnet4Id` (public).
+
+## `foundation.yaml`
+
+**Purpose:** Creates **only** the Terraform deploy/install role (+ instance
+profile) and the Terraform state S3 bucket, for one customer AWS
+account/company. Deploy once per customer AWS account/company, before
+Terraform runs.
+
+**Permissions included** — the deploy role can create and manage:
+- EKS clusters and node groups; VPC networking (subnets, security groups, routing); EFS file systems; S3 buckets (Trino data, PostgreSQL backups, tfstate); KMS encryption keys; ACM certificates; EC2 instances and launch templates; AWS Glue databases and catalogs; Elastic Load Balancers
+- Plus, beyond the legacy `install_role.yaml`: patching the operational
+  roles' OIDC trust policies once the real cluster/OIDC provider exists
+  (`iam-operational-role-trust-mgmt`), invoking the tenant-registration API
+  (`registry-invoke`), reading/writing the gitops secret bundles used by
+  agent enrollment (`gitops-secret-bundles`), and the tfstate bucket's own
+  object/bucket operations (`tfstate-bucket`)
+
+**Parameters:** `CompanyName`, `Environment` (both required), `PromethiumInstallRole` (optional name override).
+
+**Outputs:** `DeployRoleArn`, `InstanceProfileArn`, `InstanceProfileName`, `TfStateBucket`.
+
+## `operational_roles.yaml`
+
+**Purpose:** Creates the 9 IAM roles required by EKS cluster operations and
+Kubernetes service accounts, plus the Lambda-backed `TagResolver` custom
+resource that tags them. Deploy after `foundation.yaml`; `OIDCProviderUrl` is
+left at its dummy default here — Terraform creates the real cluster + OIDC
+provider later, then patches these roles' trust policies to the real URL
+(see `foundation.yaml`'s `iam-operational-role-trust-mgmt` policy).
+
+**The 9 roles:**
+- EKS cluster role, EKS worker-node role
+- EBS CSI driver role, EFS CSI driver role
+- Load Balancer Controller role
+- Cluster Autoscaler role
+- PG backup role
+- Glue/Trino role (`trino-oidc-role`)
+- ArgoCD ECR refresher role — mints short-lived ECR tokens so the cluster can
+  pull the Promethium OCI umbrella chart/images (agent / Model A′ installs)
+
+Default role names follow `promethium-<Environment>-<CompanyName>-<role>`
+(e.g. `promethium-prod-acme-ebs-csi-driver-role`).
+
+**Parameters:** `CompanyName`, `Environment` (both required), `CustomClusterName`, `OIDCProviderUrl` (dummy default until Terraform creates the real cluster), and a per-role name override for each of the 9 roles (all optional).
+
+**Outputs:** `EKSClusterRoleArn`, `EKSWorkerNodeRoleArn`, `EBSCSIDriverRoleArn`, `EFSCSIDriverRoleArn`, `LoadBalancerControllerRoleArn`, `ClusterAutoscalerRoleArn`, `PGBackupServiceRoleArn`, `GlueTrinoServiceRoleArn`, `ArgocdEcrRefresherRoleArn`.
+
+## `jumpbox.yaml`
+
+**Purpose:** Creates the EC2 install VM (in a private subnet) that Terraform
+runs from. Its `UserData` self-installs git, Terraform, kubectl, and Helm at
+boot — no AMI baking or hand-run tool-install script needed. Optional in both
+install paths (`prereqs.sh --no-jumpbox` skips it) — it's only *where you run
+`deploy.sh` from*, not a hard dependency `deploy.sh` checks for.
+
+**Parameters:** `Environment` (required), `VpcId`, `PrivateSubnet1Id` (from
+the network stack, or your own VPC), `JumpboxName`, `JumpboxInstanceType`,
+`UseExistingInstanceProfile`.
+
+**Outputs:** `JumpboxInstanceId`, `JumpboxSecurityGroupId`.
+
+---
+
+## Legacy: `install_role.yaml` (manual, non-agent path)
+
+**Purpose:** Creates the IAM role and instance profile Terraform uses in the
+manual (non-agent) install — the predecessor to `foundation.yaml`'s deploy
+role, before the per-account-plus-operational-roles split.
+
+**Parameters:** `PromethiumInstallRole` (name for the deployment role,
+default `PromethiumDeploymentRole`), `Environment` (default `prod`).
+
+**Deployment:**
 ```bash
 aws cloudformation create-stack \
   --stack-name promethium-install-role \
@@ -35,59 +132,37 @@ aws cloudformation create-stack \
   --capabilities CAPABILITY_NAMED_IAM
 ```
 
-## Template 2: operational_roles.yaml
+**Outputs:** `RoleArn`, `InstanceProfileArn`, `InstanceProfileName`.
 
-### Purpose
-Creates the IAM roles required by Kubernetes service accounts and EKS cluster operations after installation.
+## Legacy: `verifier_policy.yaml` (manual, non-agent path)
 
-### Parameters
-All parameters are optional and allow customization:
+**Purpose:** Adds read-only CloudFormation/IAM/EKS permissions to the install
+role so the manual path's verifier scripts can run from the jumpbox. Not
+needed by the scripted flow.
 
-- **ClusterName**: EKS cluster name (default: `promethium-datafabric-prod-eks-cluster`)
-- **OIDCProviderUrl**: OIDC provider URL from your EKS cluster (required - replace the dummy value)
-- **Role Name Parameters**: Custom names for each of the 8 roles (optional)
+---
 
-### Prerequisites
-Before deploying this template, you need:
-1. An EKS cluster already created
-2. The OIDC provider URL from your cluster
+## Deployment order
 
-To get your OIDC provider URL:
-```bash
-aws eks describe-cluster --name <cluster-name> --query "cluster.identity.oidc.issuer" --output text
-```
+**Scripted (Model A′):** `prereqs.sh` deploys, in order, `network.yaml`
+(skipped for BYO VPC) → `foundation.yaml` → `operational_roles.yaml` →
+`jumpbox.yaml` (skipped with `--no-jumpbox`). All four are local deploys (no
+S3 bucket) and idempotent — safe to re-run if an earlier step failed partway
+through. See [../scripts/README.md](../scripts/README.md).
 
-### Deployment
-```bash
-aws cloudformation create-stack \
-  --stack-name promethium-operational-roles \
-  --template-body file://operational_roles.yaml \
-  --parameters \
-    ParameterKey=ClusterName,ParameterValue=your-cluster-name \
-    ParameterKey=OIDCProviderUrl,ParameterValue=oidc.eks.region.amazonaws.com/id/YOUR_OIDC_ID \
-  --capabilities CAPABILITY_NAMED_IAM
-```
+**Manual (non-agent) reference:**
+1. Deploy `install_role.yaml` to create the Terraform deployment role
+2. Deploy `operational_roles.yaml` — leave `OIDCProviderUrl` at its dummy
+   default (same template and two-pass model the scripted flow uses; see
+   above)
+3. Use Terraform with the created role to deploy your EKS infrastructure;
+   Terraform patches the operational roles' trust policies to the real OIDC
+   provider once the cluster exists
 
-## Deployment Order
+## Service Account Bindings
 
-1. **First**: Deploy `install_role.yaml` to create the Terraform deployment role
-2. **Second**: Use Terraform with the created role to deploy your EKS infrastructure
-3. **Third**: Deploy `operational_roles.yaml` with your actual cluster OIDC provider URL
-
-## Important Notes
-
-### Security Considerations
-- Both templates create IAM roles with specific, scoped permissions
-- The install role includes cross-account assume role permissions for specific Promethium SaaS accounts
-- All roles follow the principle of least privilege for their specific functions
-
-### Customization
-- Role names can be customized using template parameters
-- Resource naming follows the pattern: `promethium-prod-*` (configurable)
-- All resources are tagged with CloudFormation stack information
-
-### Service Account Bindings
-After deploying operational_roles.yaml, you'll need to annotate Kubernetes service accounts with the IAM role ARNs. Example:
+After deploying `operational_roles.yaml`, Kubernetes service accounts are
+annotated with the IAM role ARNs. Example:
 
 ```yaml
 apiVersion: v1
@@ -96,18 +171,20 @@ metadata:
   name: ebs-csi-controller-sa
   namespace: kube-system
   annotations:
-    eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT_ID:role/promethium-prod-ebs-csi-driver-role
+    eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT_ID:role/promethium-prod-<company>-ebs-csi-driver-role
 ```
 
-## Outputs
+## Security Considerations
 
-### install_role.yaml Outputs
-- `RoleArn` - ARN of the Terraform deployment role
-- `InstanceProfileArn` - ARN of the EC2 instance profile
-- `InstanceProfileName` - Name of the instance profile
-
-### operational_roles.yaml Outputs
-- Role ARNs for all 8 operational roles (used in Kubernetes service account annotations)
+- All templates create IAM roles with specific, scoped permissions
+- `foundation.yaml`'s deploy role includes cross-account assume-role
+  permissions for the Promethium SaaS accounts (state backend, agent
+  enrollment secrets)
+- All roles follow the principle of least privilege for their specific
+  functions
+- Role names can be customized using template parameters; resource naming
+  follows `promethium-<environment>-<company>-*` for the current templates
+  (`promethium-prod-*`-style defaults for the legacy `install_role.yaml`)
 
 ## Support
 

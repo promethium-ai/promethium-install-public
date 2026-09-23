@@ -5,6 +5,11 @@ Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label:
+          default: "Core (Required)"
+        Parameters:
+          - Environment
+          - CompanyName
+      - Label:
           default: "VPC Configuration"
         Parameters:
           - VpcName
@@ -14,6 +19,10 @@ Metadata:
         Parameters:
           - EksClusterName
     ParameterLabels:
+      Environment:
+        default: "Environment (dev/qa/preview/prod)"
+      CompanyName:
+        default: "Company Name"
       VpcName:
         default: "VPC Name"
       VpcCidrBlock:
@@ -22,6 +31,26 @@ Metadata:
         default: "EKS Cluster Name (used for subnet tags)"
 
 Parameters:
+  Environment:
+    Type: String
+    AllowedValues:
+      - dev
+      - qa
+      - preview
+      - prod
+    Description: >-
+      Deployment environment for this tenant. REQUIRED — no default, so a stack
+      can never silently provision prod-shaped names. Used (with CompanyName)
+      to compute the default EKS cluster name below when EksClusterName is left
+      blank, and stamped as an Environment tag on every resource in this stack.
+
+  CompanyName:
+    Type: String
+    Description: >-
+      Short company identifier (e.g. acme), lowercase, no spaces (recommended
+      max 15 chars). Used (with Environment) to compute the default EKS cluster
+      name below when EksClusterName is left blank. REQUIRED.
+
   VpcName:
     Type: String
     Default: promethium-vpc
@@ -35,8 +64,17 @@ Parameters:
 
   EksClusterName:
     Type: String
-    Default: promethium-datafabric-prod-eks-cluster
-    Description: Name of the EKS cluster. Used to apply required kubernetes subnet tags.
+    Default: ''
+    Description: >-
+      Optional EKS cluster name override, applied as the required kubernetes
+      subnet tags. Leave blank to use the default format
+      promethium-datafabric-<Environment>-<CompanyName>-eks-cluster — this MUST
+      match the actual EKS cluster name Terraform creates (custom_cluster_name /
+      eks_cluster_name in terraform.tfvars), since these subnet tags are how the
+      AWS Load Balancer Controller and cluster-autoscaler discover subnets.
+
+Conditions:
+  HasCustomEksClusterName: !Not [!Equals [!Ref EksClusterName, '']]
 
 Resources:
 
@@ -51,6 +89,8 @@ Resources:
       Tags:
         - Key: Name
           Value: !Ref VpcName
+        - Key: Environment
+          Value: !Ref Environment
 
   # ── Internet Gateway ──────────────────────────────────────────────────────────
 
@@ -60,6 +100,8 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub ${VpcName}-igw
+        - Key: Environment
+          Value: !Ref Environment
 
   InternetGatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
@@ -84,9 +126,13 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub ${VpcName}-private-1
+        - Key: Environment
+          Value: !Ref Environment
         - Key: kubernetes.io/role/internal-elb
           Value: "1"
-        - Key: !Sub kubernetes.io/cluster/${EksClusterName}
+        - Key: !Sub
+            - kubernetes.io/cluster/${ClusterNameEffective}
+            - ClusterNameEffective: !If [HasCustomEksClusterName, !Ref EksClusterName, !Sub 'promethium-datafabric-${Environment}-${CompanyName}-eks-cluster']
           Value: owned
 
   PrivateSubnet2:
@@ -99,9 +145,13 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub ${VpcName}-private-2
+        - Key: Environment
+          Value: !Ref Environment
         - Key: kubernetes.io/role/internal-elb
           Value: "1"
-        - Key: !Sub kubernetes.io/cluster/${EksClusterName}
+        - Key: !Sub
+            - kubernetes.io/cluster/${ClusterNameEffective}
+            - ClusterNameEffective: !If [HasCustomEksClusterName, !Ref EksClusterName, !Sub 'promethium-datafabric-${Environment}-${CompanyName}-eks-cluster']
           Value: owned
 
   PrivateSubnet3:
@@ -114,9 +164,13 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub ${VpcName}-private-3
+        - Key: Environment
+          Value: !Ref Environment
         - Key: kubernetes.io/role/internal-elb
           Value: "1"
-        - Key: !Sub kubernetes.io/cluster/${EksClusterName}
+        - Key: !Sub
+            - kubernetes.io/cluster/${ClusterNameEffective}
+            - ClusterNameEffective: !If [HasCustomEksClusterName, !Ref EksClusterName, !Sub 'promethium-datafabric-${Environment}-${CompanyName}-eks-cluster']
           Value: owned
 
   PublicSubnet1:
@@ -129,6 +183,8 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub ${VpcName}-public-1
+        - Key: Environment
+          Value: !Ref Environment
 
   # ── NAT Gateway ───────────────────────────────────────────────────────────────
 
@@ -140,6 +196,8 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub ${VpcName}-nat-eip
+        - Key: Environment
+          Value: !Ref Environment
 
   NatGateway:
     Type: AWS::EC2::NatGateway
@@ -149,6 +207,8 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub ${VpcName}-nat
+        - Key: Environment
+          Value: !Ref Environment
 
   # ── Route Tables ──────────────────────────────────────────────────────────────
 
@@ -159,6 +219,8 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub ${VpcName}-public-rt
+        - Key: Environment
+          Value: !Ref Environment
 
   PublicRoute:
     Type: AWS::EC2::Route
@@ -181,6 +243,8 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub ${VpcName}-private-rt
+        - Key: Environment
+          Value: !Ref Environment
 
   PrivateRoute:
     Type: AWS::EC2::Route
