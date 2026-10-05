@@ -1,0 +1,31 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "CaptureAndProbe",
+      "Effect": "Allow",
+      "Action": [
+        "eks:DescribeCluster",
+        "eks:ListNodegroups",
+        "sqs:GetQueueUrl",
+        "kms:ListAliases"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "RaiseNodegroupFloorBeforeWipe",
+      "Effect": "Allow",
+      "Action": "eks:UpdateNodegroupConfig",
+      "Resource": "arn:aws:eks:<REGION>:<ACCOUNT>:nodegroup/<CLUSTER>/*/*"
+    },
+    {
+      "Sid": "CreateTheEcrRefresherRole",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole",
+        "iam:PutRolePolicy"
+      ],
+      "Resource": "arn:aws:iam::<ACCOUNT>:role/promethium-<ENV>-<TENANT>-argocd-ecr-refresher"
+    }
+  ]
+}

@@ -25,13 +25,16 @@ sync — a human copies files over by hand, on a schedule of "before each releas
 07-verify.sh
 08-ingress-dns.sh
 lib.sh
+migration-operator-policy.json
 migration.env.example
 CLAUDE.md
 ```
 
-`README.md`, `scrub-check.sh`, and this file (`PACKAGING.md`) are **not** synced from the
-private repo — they're authored directly here, for the public audience, and don't exist
-in that form on the private side.
+`README.md`, `customer-migration-guide.md`, `scrub-check.sh`, and this file (`PACKAGING.md`)
+are **not** synced from the private repo — they're authored directly here, for the public
+audience, and don't exist in that form on the private side. (`customer-migration-guide.md` is a
+customer-audience rewrite of the private `docs/customer-migration-guide.reuse-draft.md`, with the
+internal-reviewer notes stripped; keep those out when re-syncing.)
 
 ### Explicit exclude list (never copy these — they are operator-only or sensitive)
 
