@@ -49,9 +49,20 @@ if [ "$EXTERNAL_SECRETS" = false ]; then
   GIT_U=$(printf '%s' "$RJ_CLONE" | sed -nE 's#.*https://([^:]+):[^@]+@github\.com.*#\1#p')
   GIT_P=$(printf '%s' "$RJ_CLONE" | sed -nE 's#.*https://[^:]+:([^@]+)@github\.com.*#\1#p')
   if [ -n "$GIT_U" ] && [ -n "$GIT_P" ]; then
-    kc -n "$NAMESPACE" patch secret remote-job-service --type merge \
-      -p "$(jq -n --arg u "$(printf %s "$GIT_U" | base64)" --arg p "$(printf %s "$GIT_P" | base64)" '{data:{GIT_USERNAME:$u,GIT_PAT:$p}}')" >/dev/null \
-      && echo "  seeded GIT_USERNAME/GIT_PAT into remote-job-service (reused from the legacy init container)"
+    # clobber-guard: only seed when the secret LACKS a GIT_PAT. In reuse-mode the legacy
+    # remote-job-service secret is KEPT, so it already carries creds; NEVER overwrite an
+    # existing value (it may be a FRESH PAT the operator staged per the GIT_PAT-staleness
+    # preflight warning — re-stamping the legacy init-container one would clobber it).
+    EXISTING_PAT="$(kc -n "$NAMESPACE" get secret remote-job-service -o jsonpath='{.data.GIT_PAT}' 2>/dev/null || true)"
+    if [ -n "$EXISTING_PAT" ]; then
+      echo "  remote-job-service already has GIT_PAT — left as-is (stage a fresh PAT yourself if stale; see 00-reuse-preflight)"
+    else
+      # secret-safe: the PAT goes value->env->jq(@base64)->stdin patch-file — never in argv.
+      GIT_U="$GIT_U" GIT_P="$GIT_P" jq -n '{data:{GIT_USERNAME:(env.GIT_U|@base64),GIT_PAT:(env.GIT_P|@base64)}}' \
+        | kc -n "$NAMESPACE" patch secret remote-job-service --type merge --patch-file=/dev/stdin >/dev/null \
+        && echo "  seeded GIT_USERNAME/GIT_PAT into remote-job-service (reused from the legacy init container)"
+    fi
+    unset EXISTING_PAT
   else
     echo "  WARN: no git creds in the legacy remote-job-service init container — if this tenant clones drivers, seed GIT_USERNAME/GIT_PAT into the remote-job-service secret manually (Promethium PAT: promethium-ie-github-credentials key remote-job-github-pat, user promethium_ai_support)."
   fi
@@ -103,7 +114,8 @@ for s in "${PLATFORM_SECRETS[@]}"; do
     else
       GIT_PAT="$(aws secretsmanager get-secret-value --secret-id "${GITHUB_CREDS_SECRET_ID:-promethium-ie-github-credentials}" \
         --region "$REGION" --query SecretString --output text | jq -r '.["remote-job-github-pat"]')"
-      VAL="$(printf '%s' "$VAL" | jq -c --arg u "${REMOTE_JOB_GIT_USERNAME:-promethium_ai_support}" --arg p "$GIT_PAT" '. + {GIT_USERNAME:$u, GIT_PAT:$p}')"
+      # secret-safe: GIT_PAT via env (env.GIT_PAT), never in jq argv; username is not secret.
+      VAL="$(printf '%s' "$VAL" | GIT_PAT="$GIT_PAT" jq -c --arg u "${REMOTE_JOB_GIT_USERNAME:-promethium_ai_support}" '. + {GIT_USERNAME:$u, GIT_PAT:env.GIT_PAT}')"
       echo "  remote-job-service: git creds not in live secret — seeded from control-plane (fallback)"
     fi
   fi
