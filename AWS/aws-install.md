@@ -1,12 +1,14 @@
 # Promethium Intelligent Edge AWS Installation (Customer)
 
-This page documents the AWS install steps run by the **customer**, on-call with the Promethium associate. It follows after the customer completes prerequisites ([`README.md`](README.md)) and the Promethium associate completes pre-call setup ([aws-install-pre-call.md](aws-install-pre-call.md)).
+This page documents the AWS install steps run by the **customer**. **New installs should use the scripted Model A′ flow** below — see [README.md → Install paths](README.md#install-paths) for how it compares to the manual flow kept further down as a reference.
 
-The customer provides an existing VPC (with subnets and routing), an EC2 install VM/jumpbox, the Terraform install role (`install_role.yaml`), and all operational IAM roles (`operational_roles.yaml`). The Terraform deployment creates the EKS cluster, configures OIDC trust policies, deploys EKS add-ons, and installs the full Promethium application stack.
-
-> Promethium is deployed with an **internal load balancer** — accessible via VPN only.
+> Promethium is deployed with an **internal load balancer** — accessible via VPN only, on both paths.
 
 - [Promethium Intelligent Edge AWS Installation (Customer)](#promethium-intelligent-edge-aws-installation-customer)
+- [Scripted install (Model A′)](#scripted-install-model-a)
+  - [Validate](#validate)
+  - [Teardown](#teardown)
+- [Reference: manual (non-agent) install](#reference-manual-non-agent-install)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
   - [1. Setup: Connect to the Install VM and configure the environment](#1-setup-connect-to-the-install-vm-and-configure-the-environment)
@@ -30,10 +32,75 @@ The customer provides an existing VPC (with subnets and routing), an EC2 install
     - [5.1 Check pods](#51-check-pods)
     - [5.2 Update support password](#52-update-support-password)
   - [Troubleshooting](#troubleshooting)
-  - [Teardown](#teardown)
+  - [Teardown](#teardown-1)
 
 
 ---
+
+# Scripted install (Model A′)
+
+This is the primary customer install step, after the shared
+[Environment Prerequisites and VPC/Networking Requirements](README.md#prerequisites)
+and the Promethium-side cross-account grants
+([aws-install-pre-call.md](aws-install-pre-call.md)).
+
+Once `./AWS/scripts/prereqs.sh <company> <env>` has deployed the
+CloudFormation prerequisites (`network.yaml` [skipped for BYO VPC],
+`foundation.yaml`, `operational_roles.yaml`, `jumpbox.yaml` — see
+[scripts/README.md](scripts/README.md)), run the install from the jumpbox (or
+an equivalent host with the customer account's credentials and, once the
+cluster exists, private network reach to its API):
+
+```bash
+./AWS/scripts/deploy.sh <company> <env>
+```
+
+`deploy.sh` stages: cluster → SG-ingress + kubeconfig → full Terraform apply
+(`module.aws`, then everything else) → tenant registration → (unless
+`--skip-agent`) agent enrollment — hub-side mTLS cert issuance, then
+spoke-side `install-agent.sh`. Default is a **private cluster + internal
+ALB**. See [scripts/README.md](scripts/README.md) for the full flag list
+(`--vpc-id`/`--subnet-ids` for BYO VPC, `--iac-ref`, `--eks-version`,
+`--image-tag`, `--loadbalancer-type`, `--skip-agent`, etc.) and
+[runbook-agent-mode.md](runbook-agent-mode.md) for the complete runbook,
+including the 3-part agent enrollment when it isn't run end-to-end by
+`deploy.sh`.
+
+## Validate
+
+```bash
+kubectl -n intelligentedge get pods            # ~21 Running once the hub Application lands
+```
+
+The install is **in-VPC only** (internal ALB) — validate from inside the VPC,
+never a public browser. See [runbook-agent-mode.md](runbook-agent-mode.md)
+for the headless `SHOW CATALOGS` check (mint a Cognito IdToken, then curl
+`/v1/statement` from inside the Trino coordinator pod).
+
+## Teardown
+
+```bash
+./AWS/scripts/destroy.sh <company> <env>
+```
+
+One command, matching whatever non-default flags `deploy.sh` was given (see
+`--help` on either script). Run it from a separate host — never from the
+jumpbox being torn down, since one of its steps deletes that jumpbox's own
+CloudFormation stack. See [scripts/README.md](scripts/README.md) and
+[runbook-agent-mode.md](runbook-agent-mode.md) for the full teardown sequence
+and troubleshooting.
+
+---
+
+# Reference: manual (non-agent) install
+
+> **Superseded by the [scripted install](#scripted-install-model-a) above for
+> new installs.** Kept as a reference for customers/paths not yet on Model A′.
+> It follows after the customer completes prerequisites
+> ([`README.md`](README.md)) and the Promethium associate completes pre-call
+> setup ([aws-install-pre-call.md](aws-install-pre-call.md)).
+
+The customer provides an existing VPC (with subnets and routing), an EC2 install VM/jumpbox, the Terraform install role (`install_role.yaml`), and all operational IAM roles (`operational_roles.yaml`). The Terraform deployment creates the EKS cluster, configures OIDC trust policies, deploys EKS add-ons, and installs the full Promethium application stack.
 
 # Prerequisites
 
@@ -109,7 +176,7 @@ cd promethium-internal-ie-aws
 
 ### 2.2 Source all customer outputs
 
-Source the `promethium-outputs-${COMPANY_NAME}.sh` file on the branch (originally generated from [README.md Section 6](README.md#6-customer-information-required-by-promethium)) inside the Jumpbox at the start of **each** session:
+Source the `promethium-outputs-${COMPANY_NAME}.sh` file on the branch (originally generated from [README.md → Customer Information Required by Promethium](README.md#customer-information-required-by-promethium)) inside the Jumpbox at the start of **each** session:
 
 ```bash
 source promethium-outputs-${COMPANY_NAME}.sh

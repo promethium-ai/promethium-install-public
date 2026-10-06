@@ -1,0 +1,77 @@
+name: Migration bundle release
+
+# Manually publish a versioned tarball of migration/ as a GitHub Release on THIS repo
+# (promethium-install-public — public). Nothing here runs automatically: a human with
+# write access must trigger it from the Actions tab (or `gh workflow run`) and supply a
+# version. See migration/PACKAGING.md for the full release process this workflow
+# implements, and why v1 of this bundle is a manually-synced copy of the private
+# gitops-tenants-registry/scripts/migration/ source.
+#
+# The scrub-check step is a hard gate: if migration/ contains any internal Promethium
+# literal (account id, ARN, internal hostname, etc.), the run fails BEFORE a tarball is
+# built or a release is created.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, e.g. migration-v1.0.0"
+        required: true
+        type: string
+
+# Least-privilege: this is all `gh release create` needs against this repo.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate version input
+        # Cheap guard against a typo'd or shell-hostile input before it's used in a
+        # filename and a git tag below. Adjust the pattern if your version scheme differs.
+        run: |
+          version="${{ inputs.version }}"
+          if [[ ! "$version" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::version '$version' contains characters outside [A-Za-z0-9._-]"
+            exit 1
+          fi
+
+      - name: Scrub-check — fail on any internal literal in migration/
+        # The forbidden literals live in repo-level Actions VARIABLES (Settings → Secrets and
+        # variables → Actions → Variables), NOT in the committed scanner — so this public repo
+        # never hardcodes an internal account id or hostname. Configure before first release:
+        #   SCRUB_ACCOUNTS = space-separated internal AWS account ids
+        #   SCRUB_HOSTS    = space-separated internal host/name substrings (e.g. the hub cluster names)
+        env:
+          SCRUB_ACCOUNTS: ${{ vars.SCRUB_ACCOUNTS }}
+          SCRUB_HOSTS: ${{ vars.SCRUB_HOSTS }}
+        run: |
+          chmod +x migration/scrub-check.sh   # safety net; git should already carry +x
+          ./migration/scrub-check.sh
+
+      - name: Build release tarball
+        id: tarball
+        run: |
+          version="${{ inputs.version }}"
+          # Avoid a redundant "migration-migration-v1.0.0.tar.gz" when the version
+          # already carries the "migration-" prefix (as in the workflow's own example).
+          case "$version" in
+            migration-*) name="${version}.tar.gz" ;;
+            *)           name="migration-${version}.tar.gz" ;;
+          esac
+          tar -czf "$name" migration/
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ inputs.version }}" \
+            "${{ steps.tarball.outputs.name }}" \
+            --repo "${{ github.repository }}" \
+            --title "Migration bundle ${{ inputs.version }}" \
+            --generate-notes
