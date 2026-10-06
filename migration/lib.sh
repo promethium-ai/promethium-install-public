@@ -94,8 +94,9 @@ JSON
 # allow each repo, not just the registry's own resource policy. Omitting iac/* + promethium/* =
 # ImagePullBackOff on postgres (iac/docker/promethium-bitnami-postgres-16) + nginx/redis/trino-stream
 # (promethium/*) — a lesson from an earlier migration. charts/intelligent-edge = the OCI umbrella
-# (repo-server chart pull); services/ie/* + iac/* + promethium/* = the container images kubelet
-# pulls via aws-ecr-docker-creds.
+# + charts/mantra-edge = the mantra-edge peer chart (both are repo-server chart pulls for ArgoCD
+# manifest gen); services/ie/* + iac/* + promethium/* = the container images kubelet pulls via
+# aws-ecr-docker-creds.
 gen_perms_refresher(){
   cat <<JSON
 { "Version":"2012-10-17","Statement":[
@@ -103,6 +104,7 @@ gen_perms_refresher(){
   {"Effect":"Allow","Action":["ecr:BatchGetImage","ecr:GetDownloadUrlForLayer","ecr:BatchCheckLayerAvailability","ecr:DescribeImages"],
    "Resource":[
      "arn:aws:ecr:us-west-1:${ECR_ACCOUNT}:repository/charts/intelligent-edge",
+     "arn:aws:ecr:us-west-1:${ECR_ACCOUNT}:repository/charts/mantra-edge",
      "arn:aws:ecr:us-west-1:${ECR_ACCOUNT}:repository/services/ie/*",
      "arn:aws:ecr:us-west-1:${ECR_ACCOUNT}:repository/iac/*",
      "arn:aws:ecr:us-west-1:${ECR_ACCOUNT}:repository/promethium/*"]}]}
