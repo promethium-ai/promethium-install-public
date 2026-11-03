@@ -1,0 +1,312 @@
+{
+  "_meta": {
+    "description": "Golden fixture for check-role-drift.py. Expected shape (trust subjects, service principals, attached managed-policy ARNs, and inline-policy statement action/resource sets) for each of the 8 operational IAM roles, hand-derived from the legacy Terraform module -- NOT parsed from Terraform at runtime.",
+    "reference_repo": "/Users/antoniopm61data/pm61data/iac-terraform-install-redesign",
+    "reference_repo_note": "All 'source' paths below are relative to reference_repo, i.e. 'modules/iam_oidc/x.tf' means '<reference_repo>/aws/infrastructure/modules/iam_oidc/x.tf'. locals.tf and variables.tf are at '<reference_repo>/aws/infrastructure/{locals,variables}.tf'.",
+    "derived_on": "2026-08-20",
+    "regenerate_when": "module.iam_oidc/*.tf, modules/iam/*.tf, or locals.tf's role_config in the reference repo change. Re-read the cited source lines, re-derive trust_subjects/service_principals/managed_policy_arns/statements for the affected role(s), and update both the JSON and the 'source' citation if line numbers moved.",
+    "normalization_applied_by_script": [
+      "1. RoleName is never read from either side -- roles are matched by CloudFormation logical ID / Terraform resource, not by the generated name string.",
+      "2. KMS Resource: any 'arn:aws:kms:<region>:<account>:key/<anything>' collapses to 'arn:aws:kms:*:*:key/*' on both sides (customer-CFT convention == TF's scoped ebs_kms_key_arn/kms_key_id).",
+      "3. Region/account/partition placeholders (${AWS::Region}/${AWS::AccountId} and TF's data.aws_region.current.*/data.aws_caller_identity.current.account_id) collapse to '*' on both sides.",
+      "4. GlueTrinoServiceRole's self-referential iam:PassRole resource (it passes itself to glue.amazonaws.com) collapses to 'arn:aws:iam::*:role/<SELF>' -- this is rule 1 applied to a Resource value rather than a RoleName property."
+    ],
+    "known_caveats": [
+      "PGBackupServiceRole trust_subjects below (4 subjects, matching foundation.yaml) are derived from modules/iam_oidc/pgbackup-cj-oidc.tf's dynamic 'system:serviceaccount:${ns}:sa-ecr-registry' loop over the ROOT var.cronjob_namespaces DEFAULT (variables.tf:289-293, default = [\"intelligentedge\", \"rasa\", \"cluster-management\"]) plus its hardcoded intelligentedge:s3-backup-sa subject -- NOT from locals.tf's role_config.pg_backup_cronjob_oidc_role_arn, which is STALE: it hardcodes only 3 namespace/sa_name pairs (intelligentedge/sa-ecr-registry, cluster-management/sa-ecr-registry, intelligentedge/s3-backup-sa) and is missing a 'rasa' entry entirely (locals.tf:41-45). That role_config feeds module.modify_iam_oidc_role_trust_policy, the trust-PATCH path Terraform runs against BYO (foundation.yaml-created) roles post-cluster-creation -- so as written today, the reference repo's own trust-patch would silently drop the rasa grant it it ever ran against a real BYO PGBackupServiceRole. Flagged separately (not this script's concern -- it's an inconsistency inside the TF reference, not a CFT-vs-TF drift); see the spawned follow-up task. This script's baseline intentionally follows the 4-subject (cronjob_namespaces-derived) version because it is what the *directly-created* role gets, it is internally consistent with variables.tf's own default, and it is what foundation.yaml already matches."
+    ]
+  },
+  "roles": {
+    "EBSCSIDriverRole": {
+      "source": [
+        "modules/iam_oidc/aws-ebs-csi-driver-oidc.tf:1-75 (trust + kms_access_policy + managed-policy attachment)",
+        "modules/iam_oidc/vars.tf:13-15 (aws_ebs_csi_driver_managed_roles default)",
+        "locals.tf:36-40 (role_config.aws_ebs_driver_role_arn -- corroborates the OIDC subject)"
+      ],
+      "trust_subjects": [
+        "system:serviceaccount:kube-system:ebs-csi-controller-sa"
+      ],
+      "service_principals": [],
+      "managed_policy_arns": [
+        "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+      ],
+      "statements": [
+        {
+          "actions": ["kms:CreateGrant", "kms:ListGrants", "kms:RevokeGrant"],
+          "resources": ["arn:aws:kms:*:*:key/*"]
+        },
+        {
+          "actions": ["kms:Decrypt", "kms:DescribeKey", "kms:Encrypt", "kms:GenerateDataKey*", "kms:ReEncrypt*"],
+          "resources": ["arn:aws:kms:*:*:key/*"]
+        }
+      ]
+    },
+
+    "EFSCSIDriverRole": {
+      "source": [
+        "modules/iam_oidc/aws-efs-csi-driver-oidc.tf:14-45 (trust)",
+        "modules/iam_oidc/policies/efs-policy.json:1-39 (statements, attached via aws_iam_policy + aws_iam_role_policy_attachment)",
+        "locals.tf:31-35 (role_config.aws_efs_driver_role_arn -- corroborates the OIDC subject)"
+      ],
+      "trust_subjects": [
+        "system:serviceaccount:kube-system:efs-csi-controller-sa"
+      ],
+      "service_principals": [],
+      "managed_policy_arns": [],
+      "statements": [
+        {
+          "actions": ["ec2:DescribeAvailabilityZones", "elasticfilesystem:DescribeAccessPoints", "elasticfilesystem:DescribeFileSystems", "elasticfilesystem:DescribeMountTargets"],
+          "resources": ["*"]
+        },
+        {
+          "actions": ["elasticfilesystem:CreateAccessPoint"],
+          "resources": ["*"]
+        },
+        {
+          "actions": ["elasticfilesystem:DeleteAccessPoint"],
+          "resources": ["*"]
+        }
+      ]
+    },
+
+    "LoadBalancerControllerRole": {
+      "source": [
+        "modules/iam_oidc/aws-lb-controller-oidc.tf:255-288 (role + trust)",
+        "modules/iam_oidc/aws-lb-controller-oidc.tf:1-253 (lb_ingress_controller_policy, attached -- foundation.yaml's equivalent is the separate LoadBalancerControllerPolicy resource)",
+        "locals.tf:21-25 (role_config.aws_lb_controller_role_arn -- corroborates the OIDC subject)"
+      ],
+      "trust_subjects": [
+        "system:serviceaccount:kube-system:aws-load-balancer-controller"
+      ],
+      "service_principals": [],
+      "managed_policy_arns": [],
+      "statements": [
+        { "actions": ["iam:CreateServiceLinkedRole"], "resources": ["*"] },
+        {
+          "actions": [
+            "ec2:DescribeAccountAttributes", "ec2:DescribeAddresses", "ec2:DescribeAvailabilityZones",
+            "ec2:DescribeCoipPools", "ec2:DescribeInstances", "ec2:DescribeInternetGateways",
+            "ec2:DescribeNetworkInterfaces", "ec2:DescribeSecurityGroups", "ec2:DescribeSubnets",
+            "ec2:DescribeTags", "ec2:DescribeVpcPeeringConnections", "ec2:DescribeVpcs",
+            "ec2:GetCoipPoolUsage",
+            "elasticloadbalancing:DescribeListenerCertificates",
+            "elasticloadbalancing:DescribeListeners", "elasticloadbalancing:DescribeLoadBalancerAttributes",
+            "elasticloadbalancing:DescribeLoadBalancers", "elasticloadbalancing:DescribeRules",
+            "elasticloadbalancing:DescribeSSLPolicies", "elasticloadbalancing:DescribeTags",
+            "elasticloadbalancing:DescribeTargetGroupAttributes", "elasticloadbalancing:DescribeTargetGroups",
+            "elasticloadbalancing:DescribeTargetHealth"
+          ],
+          "resources": ["*"]
+        },
+        {
+          "actions": [
+            "acm:DescribeCertificate", "acm:ListCertificates", "cognito-idp:DescribeUserPoolClient",
+            "iam:GetServerCertificate", "iam:ListServerCertificates",
+            "shield:CreateProtection", "shield:DeleteProtection", "shield:DescribeProtection", "shield:GetSubscriptionState",
+            "waf-regional:AssociateWebACL", "waf-regional:DisassociateWebACL", "waf-regional:GetWebACL", "waf-regional:GetWebACLForResource",
+            "wafv2:AssociateWebACL", "wafv2:DisassociateWebACL", "wafv2:GetWebACL", "wafv2:GetWebACLForResource"
+          ],
+          "resources": ["*"]
+        },
+        { "actions": ["ec2:AuthorizeSecurityGroupIngress", "ec2:RevokeSecurityGroupIngress"], "resources": ["*"] },
+        { "actions": ["ec2:CreateSecurityGroup"], "resources": ["*"] },
+        { "actions": ["ec2:CreateTags"], "resources": ["arn:aws:ec2:*:*:security-group/*"] },
+        { "actions": ["ec2:CreateTags", "ec2:DeleteTags"], "resources": ["arn:aws:ec2:*:*:security-group/*"] },
+        { "actions": ["ec2:AuthorizeSecurityGroupIngress", "ec2:DeleteSecurityGroup", "ec2:RevokeSecurityGroupIngress"], "resources": ["*"] },
+        { "actions": ["elasticloadbalancing:CreateLoadBalancer", "elasticloadbalancing:CreateTargetGroup"], "resources": ["*"] },
+        { "actions": ["elasticloadbalancing:CreateListener", "elasticloadbalancing:CreateRule", "elasticloadbalancing:DeleteListener", "elasticloadbalancing:DeleteRule"], "resources": ["*"] },
+        {
+          "actions": ["elasticloadbalancing:AddTags", "elasticloadbalancing:RemoveTags"],
+          "resources": [
+            "arn:aws:elasticloadbalancing:*:*:loadbalancer/app/*/*",
+            "arn:aws:elasticloadbalancing:*:*:loadbalancer/net/*/*",
+            "arn:aws:elasticloadbalancing:*:*:targetgroup/*/*"
+          ]
+        },
+        {
+          "actions": ["elasticloadbalancing:AddTags", "elasticloadbalancing:RemoveTags"],
+          "resources": [
+            "arn:aws:elasticloadbalancing:*:*:listener-rule/app/*/*/*",
+            "arn:aws:elasticloadbalancing:*:*:listener-rule/net/*/*/*",
+            "arn:aws:elasticloadbalancing:*:*:listener/app/*/*/*",
+            "arn:aws:elasticloadbalancing:*:*:listener/net/*/*/*"
+          ]
+        },
+        {
+          "actions": [
+            "elasticloadbalancing:DeleteLoadBalancer", "elasticloadbalancing:DeleteTargetGroup",
+            "elasticloadbalancing:ModifyLoadBalancerAttributes", "elasticloadbalancing:ModifyTargetGroup",
+            "elasticloadbalancing:ModifyTargetGroupAttributes", "elasticloadbalancing:SetIpAddressType",
+            "elasticloadbalancing:SetSecurityGroups", "elasticloadbalancing:SetSubnets"
+          ],
+          "resources": ["*"]
+        },
+        {
+          "actions": ["elasticloadbalancing:AddTags"],
+          "resources": [
+            "arn:aws:elasticloadbalancing:*:*:loadbalancer/app/*/*",
+            "arn:aws:elasticloadbalancing:*:*:loadbalancer/net/*/*",
+            "arn:aws:elasticloadbalancing:*:*:targetgroup/*/*"
+          ]
+        },
+        { "actions": ["elasticloadbalancing:DeregisterTargets", "elasticloadbalancing:RegisterTargets"], "resources": ["arn:aws:elasticloadbalancing:*:*:targetgroup/*/*"] },
+        {
+          "actions": [
+            "elasticloadbalancing:AddListenerCertificates", "elasticloadbalancing:ModifyListener",
+            "elasticloadbalancing:ModifyRule", "elasticloadbalancing:RemoveListenerCertificates",
+            "elasticloadbalancing:SetWebAcl"
+          ],
+          "resources": ["*"]
+        }
+      ]
+    },
+
+    "ClusterAutoscalerRole": {
+      "source": [
+        "modules/iam_oidc/aws-cluster-autoscaler-oidc.tf:50-78 (role + trust)",
+        "modules/iam_oidc/aws-cluster-autoscaler-oidc.tf:1-47 (cluster_autoscaler policy, attached)",
+        "locals.tf:26-30 (role_config.aws_eks_autoscaler_role_arn -- corroborates the OIDC subject)"
+      ],
+      "trust_subjects": [
+        "system:serviceaccount:kube-system:cluster-autoscaler"
+      ],
+      "service_principals": [],
+      "managed_policy_arns": [],
+      "statements": [
+        {
+          "actions": ["autoscaling:SetDesiredCapacity", "autoscaling:TerminateInstanceInAutoScalingGroup"],
+          "resources": ["*"]
+        },
+        {
+          "actions": [
+            "autoscaling:DescribeAutoScalingGroups", "autoscaling:DescribeAutoScalingInstances",
+            "autoscaling:DescribeLaunchConfigurations", "autoscaling:DescribeScalingActivities",
+            "ec2:DescribeImages", "ec2:DescribeInstanceTypes", "ec2:DescribeLaunchTemplateVersions",
+            "ec2:GetInstanceTypesFromInstanceRequirements", "eks:DescribeNodegroup"
+          ],
+          "resources": ["*"]
+        }
+      ]
+    },
+
+    "EKSClusterRole": {
+      "source": [
+        "modules/iam/roles.tf:51-79 (cluster_role -- plain eks.amazonaws.com service trust, no OIDC)",
+        "modules/iam/variables.tf:14-20 (eks_cluster_managed_role_arns default)"
+      ],
+      "trust_subjects": [],
+      "service_principals": ["eks.amazonaws.com"],
+      "managed_policy_arns": [
+        "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy",
+        "arn:aws:iam::aws:policy/AmazonEKSVPCResourceController"
+      ],
+      "statements": []
+    },
+
+    "EKSWorkerNodeRole": {
+      "source": [
+        "modules/iam/roles.tf:82-136 (workernode_role -- plain ec2.amazonaws.com service trust, no OIDC; eks_kms_policy)",
+        "modules/iam/variables.tf:22-29 (eks_worker_managed_role_arns default)"
+      ],
+      "trust_subjects": [],
+      "service_principals": ["ec2.amazonaws.com"],
+      "managed_policy_arns": [
+        "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly",
+        "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy",
+        "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy",
+        "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+      ],
+      "statements": [
+        {
+          "actions": ["kms:Decrypt", "kms:DescribeKey", "kms:Encrypt", "kms:GenerateDataKey*", "kms:ReEncrypt*"],
+          "resources": ["arn:aws:kms:*:*:key/*"]
+        }
+      ]
+    },
+
+    "PGBackupServiceRole": {
+      "source": [
+        "modules/iam_oidc/pgbackup-cj-oidc.tf:56-93 (role + trust: static intelligentedge:s3-backup-sa + [for ns in var.cronjob_namespaces: ns:sa-ecr-registry])",
+        "variables.tf:289-293 (root var.cronjob_namespaces default = [intelligentedge, rasa, cluster-management] -- see known_caveats re: locals.tf's role_config being stale/narrower)",
+        "modules/iam_oidc/pgbackup-cj-oidc.tf:1-54 (s3_access_policy statements)"
+      ],
+      "trust_subjects": [
+        "system:serviceaccount:cluster-management:sa-ecr-registry",
+        "system:serviceaccount:intelligentedge:s3-backup-sa",
+        "system:serviceaccount:intelligentedge:sa-ecr-registry",
+        "system:serviceaccount:rasa:sa-ecr-registry"
+      ],
+      "service_principals": [],
+      "managed_policy_arns": [],
+      "statements": [
+        {
+          "actions": ["s3:PutObject", "s3:PutObjectAcl"],
+          "resources": ["arn:aws:s3:::promethium-postgres-backups-*/*"]
+        },
+        {
+          "actions": ["kms:Decrypt", "kms:DescribeKey", "kms:Encrypt", "kms:GenerateDataKey*", "kms:ReEncrypt*"],
+          "resources": ["arn:aws:kms:*:*:key/*"]
+        },
+        {
+          "actions": [
+            "ecr:BatchCheckLayerAvailability", "ecr:BatchGetImage", "ecr:DescribeImageScanFindings",
+            "ecr:DescribeImages", "ecr:DescribeRepositories", "ecr:GetAuthorizationToken",
+            "ecr:GetDownloadUrlForLayer", "ecr:GetLifecyclePolicy", "ecr:GetLifecyclePolicyPreview",
+            "ecr:GetRepositoryPolicy", "ecr:ListImages", "ecr:ListTagsForResource"
+          ],
+          "resources": ["*"]
+        }
+      ]
+    },
+
+    "GlueTrinoServiceRole": {
+      "source": [
+        "modules/iam_oidc/trino-oidc.tf:103-141 (role + trust: OIDC intelligentedge:trino-sa + AllowGlueService glue.amazonaws.com)",
+        "modules/iam_oidc/trino-oidc.tf:1-101 (trino_s3_glue_access_policy statements, incl. self-PassRole)",
+        "locals.tf:46-50 (role_config.trino_oidc_role_arn -- corroborates the OIDC subject only; the AllowGlueService service-principal statement has no role_config equivalent and comes from trino-oidc.tf alone)"
+      ],
+      "trust_subjects": [
+        "system:serviceaccount:intelligentedge:trino-sa"
+      ],
+      "service_principals": ["glue.amazonaws.com"],
+      "managed_policy_arns": [],
+      "statements": [
+        {
+          "actions": [
+            "glue:BatchCreatePartition", "glue:BatchDeleteTable", "glue:BatchGetPartition", "glue:CreateTable",
+            "glue:DeleteCrawler", "glue:DeleteDatabase", "glue:DeleteTable", "glue:GetCrawler",
+            "glue:GetDatabase", "glue:GetDatabases", "glue:GetPartition", "glue:GetPartitions",
+            "glue:GetTable", "glue:GetTables", "glue:StartCrawler", "glue:StopCrawler",
+            "glue:UpdateCrawler", "glue:UpdateTable"
+          ],
+          "resources": [
+            "arn:aws:glue:*:*:catalog",
+            "arn:aws:glue:*:*:crawler/*",
+            "arn:aws:glue:*:*:database/*",
+            "arn:aws:glue:*:*:table/*",
+            "arn:aws:glue:*:*:userDefinedFunction/*/*"
+          ]
+        },
+        {
+          "actions": ["glue:CreateCrawler", "glue:CreateDatabase", "glue:GetCrawlers", "glue:ListCrawlers"],
+          "resources": ["*"]
+        },
+        {
+          "actions": [
+            "s3:DeleteObject", "s3:DeleteObjectVersion", "s3:GetObject", "s3:GetObjectACL",
+            "s3:GetObjectTagging", "s3:GetObjectVersion", "s3:GetObjectVersionTagging",
+            "s3:ListBucket", "s3:PutObject", "s3:PutObjectACL"
+          ],
+          "resources": ["arn:aws:s3:::*", "arn:aws:s3:::*/*"]
+        },
+        {
+          "actions": ["kms:Decrypt", "kms:DescribeKey", "kms:Encrypt", "kms:GenerateDataKey"],
+          "resources": ["arn:aws:kms:*:*:key/*"]
+        },
+        {
+          "actions": ["iam:PassRole"],
+          "resources": ["arn:aws:iam::*:role/<SELF>"]
+        }
+      ]
+    }
+  }
+}
