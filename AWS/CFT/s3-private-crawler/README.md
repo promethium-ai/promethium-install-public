@@ -31,6 +31,7 @@ Two IAM roles are involved. `<compute-account-id>` is the account where the IE/E
 
 **1. Trino IRSA role** (the role the Trino pod assumes, e.g. `promethium-<env>-<tenant>-trino-oidc-role`)
 - Needs `s3:ListBucket` + `s3:GetObject` on the target bucket (granted both in its identity policy and in the bucket policy below).
+- For **write-back** workloads, also needs `s3:PutObject` + `s3:DeleteObject` (see [(Optional) Write access](#optional-write-access)).
 
 **2. Glue crawler role** (the role Promethium passes to AWS Glue as the crawler role; this may be a dedicated role or, preferably, the Trino IRSA role)
 - **Trust policy** must allow AWS Glue to assume it (in addition to any existing OIDC/IRSA trust if it is the Trino role):
@@ -99,7 +100,7 @@ The script prints creation progress, lists the created resources on success, and
 ## Post-deployment
 
 ### 1. Bucket policy
-Grant **both** the Trino IRSA role and the Glue crawler role access to the bucket, restricted to requests arriving through the VPC endpoint. This example grants **whole-bucket** access, which matches how Promethium catalogs a data source (each folder becomes a table); scope it down with an `s3:prefix` condition only if you intend to expose a single prefix.
+Grant **both** the Trino IRSA role and the Glue crawler role access to the bucket, restricted to requests arriving through the VPC endpoint. This example grants **whole-bucket, read-only** access, which matches how Promethium catalogs a data source (each folder becomes a table); scope it down with an `s3:prefix` condition only if you intend to expose a single prefix. For write-back workloads, add the opt-in statement in [(Optional) Write access](#optional-write-access) below.
 
 ```json
 {
@@ -141,6 +142,33 @@ Grant **both** the Trino IRSA role and the Glue crawler role access to the bucke
 
 > **If the Trino and crawler roles are the same role**, list it once.
 > **SSE-KMS buckets:** if the bucket is encrypted with a customer-managed KMS key, also grant both roles `kms:Decrypt` (and `kms:GenerateDataKey` for writes) on the key, and add them as principals in the **KMS key policy** — a cross-account key requires both. Buckets using SSE-S3 (AES256) need no extra KMS setup.
+
+#### (Optional) Write access
+The policy above is **read-only** (`s3:ListBucket` + `s3:GetObject`). If you run **Promethium pipelines targeting this bucket**, add the statement below to the `Statement` array. Grant it only to the role(s) that actually write — typically the **Trino role**.
+
+```json
+{
+  "Sid": "AllowPutObjectViaVpcEndpoint",
+  "Effect": "Allow",
+  "Principal": {
+    "AWS": "arn:aws:iam::<compute-account-id>:role/<trino-oidc-role>"
+  },
+  "Action": [
+    "s3:PutObject",
+    "s3:DeleteObject",
+    "s3:AbortMultipartUpload",
+    "s3:ListMultipartUploadParts"
+  ],
+  "Resource": "arn:aws:s3:::<bucket-name>/*",
+  "Condition": {
+    "StringEquals": { "aws:SourceVpce": "<vpc-endpoint-id>" }
+  }
+}
+```
+
+- The writing role's **identity policy** must also allow these actions. The Promethium Trino role grants S3 writes by default; a custom/dedicated role needs `s3:PutObject` + `s3:DeleteObject`.
+- For a **cross-account** bucket this bucket-policy statement is **required** for writes — a cross-account write must be allowed by *both* the caller's identity policy and the bucket policy, so a read-only bucket policy blocks writes even when the identity policy permits them.
+- For **SSE-KMS** write targets, also grant `kms:GenerateDataKey` on the key (see the SSE-KMS note above).
 
 ### 2. Wire the connection into the Glue crawler deployment
 Set these environment variables on the `glue-crawler` deployment so Promethium attaches the connection to the crawlers it creates:
