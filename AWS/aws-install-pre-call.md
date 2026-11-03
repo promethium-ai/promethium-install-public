@@ -1,13 +1,30 @@
-
 # Promethium Intelligent Edge AWS Pre-call Installation (Promethium Associate)
 
-This page documents instructions for the Promethium associate to complete pre-call instructions, before the main AWS install ([aws-install.md](aws-install.md)), but after the customer completes prerequisites ([`README.md`](README.md)).
+This page documents the **Promethium-associate-side** work for the **scripted
+Model A′ install**, before the customer runs
+[`AWS/scripts/prereqs.sh` and `AWS/scripts/deploy.sh`](scripts/README.md),
+after the customer completes prerequisites ([`README.md`](README.md)).
 
-The instructions here create and configure a new branch for the customer from the Promethium associate's local machine.
+> ⚠️ **Run these commands on your local machine, with credentials for
+> Promethium's hub/control-plane account(s)** ⚠️
 
-> ⚠️ **Run these commands on your local machine**
+> **This supersedes the old manual branch-creation pre-call.** The per-tenant
+> Terraform branch is now **auto-bootstrapped by `deploy.sh` itself** — the
+> first time it doesn't find a `<company>` branch in
+> `promethium-internal-ie-aws`, it creates one from the `template/agent-dev`
+> template branch and pushes it, then renders that tenant's
+> `terraform.tfvars` / `backend.tf` (see `lib-tenant.sh`'s
+> `clone_or_refresh_tenant_repo` — [scripts/README.md](scripts/README.md)).
+> There is no more manual branch creation, `backend.tf`, or
+> `terraform.tfvars` authoring step for the Promethium associate to do by
+> hand. The old steps that did this are kept below at
+> [Reference: manual (non-agent) pre-call](#reference-manual-non-agent-pre-call),
+> annotated as superseded.
 
 - [Promethium Intelligent Edge AWS Pre-call Installation (Promethium Associate)](#promethium-intelligent-edge-aws-pre-call-installation-promethium-associate)
+- [Cross-account grants (one-time per customer AWS account)](#cross-account-grants-one-time-per-customer-aws-account)
+- [Agent enrollment: cert issuance](#agent-enrollment-cert-issuance)
+- [Reference: manual (non-agent) pre-call](#reference-manual-non-agent-pre-call)
   - [1. Create customer branch](#1-create-customer-branch)
   - [2. Code changes](#2-code-changes)
     - [2.1 Copy customer prerequisite outputs](#21-copy-customer-prerequisite-outputs)
@@ -16,8 +33,61 @@ The instructions here create and configure a new branch for the customer from th
     - [2.4 Push changes](#24-push-changes)
   - [3. Grant Cross-Account Trust](#3-grant-cross-account-trust)
 
+---
 
-## 1. Create customer branch
+## Cross-account grants (one-time per customer AWS account)
+
+Needed **once per customer AWS account** (NOT per tenant — for a reused
+account these persist and need no repeat). Not yet automated — tracked as
+codify item D (`onboard-customer-account`). See
+[runbook-agent-mode.md](runbook-agent-mode.md) (section "0. One-time
+per-customer-ACCOUNT setup") for the authoritative, up-to-date detail:
+
+1. **734 ECR repo policies** — grant the customer account pull access on the
+   IE chart + image repos (`charts/intelligent-edge`, `services/ie/*`,
+   `promethium/*`, `iac/docker/promethium-*`). The ECR registry is **always**
+   734236616923, us-west-1 — regardless of the tenant's environment.
+2. **734 saas-role trust** — add the customer's Terraform deploy role ARN to
+   `promethium-terraform-saas-assume-role`'s trust policy in 734236616923.
+
+`deploy.sh` checks that these are already in place before it proceeds past
+tenant registration — it does not apply them for you (see "Assumptions /
+TODO" in [scripts/README.md](scripts/README.md) for why this is a
+confirmation gate, not an automated apply).
+
+## Agent enrollment: cert issuance
+
+Later — once the customer has run `deploy.sh` through tenant registration (or
+you're running the agent-enrollment steps separately from `--skip-agent`) —
+Promethium issues the agent's mTLS certificate against the hub and registers
+it, then the bundle is relayed to the customer out-of-band via their own
+tfstate S3 bucket. See [runbook-agent-mode.md](runbook-agent-mode.md) (the
+"Agent enroll" section) and [AWS/agent/README.md](agent/README.md) for the
+full 3-part split: hub-side issuance → S3 bridge → customer-side
+`install-agent.sh`.
+
+Once the cross-account grants are in place, the customer can run
+`prereqs.sh` and `deploy.sh` themselves — see
+[README.md → Quick start (scripted A′)](README.md#quick-start-scripted-a).
+You're needed again for the agent-enrollment cert issuance once they reach
+that step (or immediately, if they pass `--skip-agent` and hand it back to
+you separately).
+
+---
+
+## Reference: manual (non-agent) pre-call
+
+> **Superseded by the Model A′ steps above for new installs.** Kept as a
+> reference for the manual (non-agent) flow documented in
+> [aws-install.md § Reference: manual (non-agent) install](aws-install.md#reference-manual-non-agent-install).
+> The instructions below create and configure a new branch for the customer
+> **by hand**, from the Promethium associate's local machine — this is the
+> step Model A′ automates away (see the superseded-pre-call note above).
+
+### 1. Create customer branch
+
+> ⚠️ **Not needed for Model A′ installs — `deploy.sh` bootstraps the tenant
+> branch automatically.** ⚠️
 
 > Replace `<company_name>` with the customer's company name before running.
 
@@ -36,11 +106,14 @@ git push -u origin ${COMPANY_NAME}
 
 ---
 
-## 2. Code changes
+### 2. Code changes
 
-### 2.1 Copy customer prerequisite outputs
+> ⚠️ **Not needed for Model A′ installs — `deploy.sh` renders
+> `terraform.tfvars` / `backend.tf` for the tenant itself.** ⚠️
 
-First, copy `promethium-outputs-${COMPANY_NAME}.sh` (generated and sent by customer in [README.md Section 6](README.md#6-customer-information-required-by-promethium)) to your local machine.
+#### 2.1 Copy customer prerequisite outputs
+
+First, copy `promethium-outputs-${COMPANY_NAME}.sh` (generated and sent by customer in [README.md → Customer Information Required by Promethium](README.md#customer-information-required-by-promethium)) to your local machine.
 
 Then source it at the start of each terminal session, this allows us to substitute output variables like `TERRAFORM_ASSUME_ROLE_ARN`, `VPC_ID`, etc. in later files to configure the tenant's branch in `promethium-internal-ie-aws`.
 
@@ -52,7 +125,7 @@ Then source it at the start of each terminal session, this allows us to substitu
 source promethium-outputs-${COMPANY_NAME}.sh
 ```
 
-### 2.2 Configure `backend.tf`
+#### 2.2 Configure `backend.tf`
 
 ```bash
 cat > backend.tf << EOF
@@ -70,7 +143,7 @@ terraform {
 EOF
 ```
 
-### 2.3 Create `terraform.tfvars`
+#### 2.3 Create `terraform.tfvars`
 
 > After running the following command, replace `<image_tag>` in `terraform.tfvars` with the Promethium release version provided by Promethium.
 
@@ -137,7 +210,7 @@ EOF
 
 ---
 
-### 2.4 Push changes
+#### 2.4 Push changes
 
 
 ```bash
@@ -148,7 +221,11 @@ git push origin ${COMPANY_NAME}
 
 ---
 
-## 3. Grant Cross-Account Trust
+### 3. Grant Cross-Account Trust
+
+> ℹ️ For Model A′ installs, see [Cross-account grants](#cross-account-grants-one-time-per-customer-aws-account)
+> above and [runbook-agent-mode.md](runbook-agent-mode.md) — this section is
+> the pre-agent-mode version of that same trust-policy grant.
 
 > ⚠️ These commands must be run from your local machine where your AWS CLI is authenticated for dev + prod accounts ⚠️
 

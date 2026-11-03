@@ -1,0 +1,107 @@
+# Model A' — ECR image-pull-secret refresher (spoke-side, REUSE-MODE / legacy umbrella).
+#
+# WHY: a legacy (pre-0.1.18) umbrella references a NAMESPACED workload image-pull Secret
+# ${TENANT_NAMESPACE}/aws-ecr-docker-creds (type kubernetes.io/dockerconfigjson) holding an ECR
+# auth token that expires in ~12h. In the legacy install a cronjob (ecr-registry-helper) refreshed
+# it; the legacy->A' migration REMOVES that cronjob (05-wipe.sh), and the OCI chart-creds refresher
+# (ecr-oci-cred-refresh.yaml) refreshes ONLY argocd/ie-ecr-oci (the umbrella CHART repo-creds), NOT
+# this workload image-pull Secret. Without a refresher every fresh image pull 403s ~12h after
+# install (the node image cache masks it until a pod reschedules onto a node without the layer).
+# This CronJob re-mints the token every 4h using the SAME refresher SA + IRSA role as the OCI
+# refresher (no new IAM: that role already grants ECR pull on charts/intelligent-edge + services/ie/*
+# + iac/* + promethium/*).
+#
+# APPLIED BY install-agent.sh (step 4b) ONLY when ${TENANT_NAMESPACE}/aws-ecr-docker-creds already
+# exists (i.e. a legacy/reuse tenant). A greenfield 0.1.18+ install has no such Secret (kubelet
+# pulls via the worker node role) and this manifest is not applied.
+#
+# DEPENDS ON the ServiceAccount argocd/argocd-ecr-cred-refresher created by ecr-oci-cred-refresh.yaml
+# (applied first). This manifest adds only a tenant-namespace Role/RoleBinding (so that SA may write
+# the one image-pull Secret cross-namespace) + the CronJob.
+#
+# envsubst vars (set by install-agent.sh, whitelisted so $TOKEN survives): ECR_REGION (us-west-1),
+# ECR_REGISTRY (734236616923.dkr.ecr.us-west-1.amazonaws.com), TENANT_NAMESPACE (intelligentedge).
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ecr-imagepull-secret-writer
+  namespace: ${TENANT_NAMESPACE}
+rules:
+  # Write ONLY in the tenant namespace: create needs the collection verb; get/patch/update let the
+  # refresher upsert the one aws-ecr-docker-creds Secret idempotently. The SA can do nothing else.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ecr-imagepull-secret-writer
+  namespace: ${TENANT_NAMESPACE}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ecr-imagepull-secret-writer
+subjects:
+  # cross-namespace subject: the refresher SA lives in argocd, writes into the tenant namespace.
+  - kind: ServiceAccount
+    name: argocd-ecr-cred-refresher
+    namespace: argocd
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ie-imagepull-refresh
+  namespace: argocd
+spec:
+  schedule: "0 */4 * * *"        # every 4h; ECR token TTL ~12h -> 3x margin
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          serviceAccountName: argocd-ecr-cred-refresher
+          restartPolicy: Never
+          containers:
+            - name: refresh
+              # alpine/k8s bundles aws-cli + kubectl (no bespoke image to build).
+              image: alpine/k8s:1.30.2
+              env:
+                - name: ECR_REGION
+                  value: "${ECR_REGION}"
+                - name: ECR_REGISTRY
+                  value: "${ECR_REGISTRY}"
+                - name: TENANT_NAMESPACE
+                  value: "${TENANT_NAMESPACE}"
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  # Same empty-token retry guard as the OCI refresher: at onboard the IRSA role was
+                  # just created and assume-role-with-web-identity can lag a minute or two. Without
+                  # this, get-login-password returns empty, the empty command-substitution slips past
+                  # set -e, and we would write a dockerconfigjson with an EMPTY password ->
+                  # ImagePullBackOff. Guard: never write an empty-password secret.
+                  TOKEN=""
+                  for i in $(seq 1 30); do
+                    TOKEN="$(aws ecr get-login-password --region "$ECR_REGION" 2>/dev/null || true)"
+                    [ -n "$TOKEN" ] && break
+                    echo "ECR token empty (IRSA not ready yet?), retry $i/30..."
+                    sleep 10
+                  done
+                  if [ -z "$TOKEN" ]; then
+                    echo "ERROR: empty ECR token after retries — IRSA role not assumable / ECR perms missing"
+                    exit 1
+                  fi
+                  # Upsert the workload image-pull secret (dockerconfigjson) idempotently. The
+                  # generator emits no metadata.namespace, so -n on the apply targets the tenant ns.
+                  kubectl -n "$TENANT_NAMESPACE" create secret docker-registry aws-ecr-docker-creds \
+                    --docker-server="$ECR_REGISTRY" \
+                    --docker-username=AWS \
+                    --docker-password="$TOKEN" \
+                    --dry-run=client -o yaml | kubectl -n "$TENANT_NAMESPACE" apply -f -
+                  echo "refreshed ${TENANT_NAMESPACE}/aws-ecr-docker-creds for host ${ECR_REGISTRY}"
