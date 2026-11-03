@@ -28,12 +28,16 @@ Parameters:
   SecurityGroupIds:
     Type: List<AWS::EC2::SecurityGroup::Id>
     Description: >
-      Security groups allowing outbound HTTPS (443) to S3
+      Security group(s) allowing outbound HTTPS (443) to S3. For the Glue NETWORK
+      connection the SG must also have a self-referencing inbound rule (all TCP,
+      from itself) so Glue can establish its ENIs.
 
   AwsRegion:
     Type: String
     Default: us-east-1
-    Description: AWS region
+    Description: >
+      AWS region. Must match the region of the target S3 bucket: an S3 Gateway
+      endpoint is regional and does not serve buckets in another region.
 
   # --- Endpoint policy (optional) ---
   AddEndpointPolicy:
@@ -53,7 +57,9 @@ Parameters:
   GlueConnectionName:
     Type: String
     Default: promethium-glue-connection
-    Description: Name of the Glue NETWORK connection
+    Description: >
+      Name of the Glue NETWORK connection. Must be unique per account per region
+      (e.g. suffix with tenant/env); CloudFormation fails if the name already exists.
 
   GlueConnectionDescription:
     Type: String
